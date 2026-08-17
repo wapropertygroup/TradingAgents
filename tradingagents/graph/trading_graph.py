@@ -71,6 +71,7 @@ class TradingAgentsGraph:
         debug=False,
         config: dict[str, Any] = None,
         callbacks: list | None = None,
+        progress_callback=None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -79,10 +80,15 @@ class TradingAgentsGraph:
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
+            progress_callback: Optional callable invoked with each streamed state
+                snapshot as the graph advances, for callers that want to show
+                progress while a run is still going. Setting it switches the run
+                onto the same streaming path ``debug`` uses.
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
+        self.progress_callback = progress_callback
 
         # Update the interface's config
         set_config(self.config)
@@ -437,11 +443,18 @@ class TradingAgentsGraph:
             tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
+        if self.debug or self.progress_callback is not None:
             trace = []
             last_printed = None
             for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
+                if self.progress_callback is not None:
+                    # Never let a progress consumer break the run: reporting is
+                    # strictly less important than the analysis it describes.
+                    try:
+                        self.progress_callback(chunk)
+                    except Exception:
+                        logger.warning("progress_callback failed", exc_info=True)
+                if self.debug and chunk["messages"]:
                     msg = chunk["messages"][-1]
                     # Nodes after the trader don't append to messages, so the
                     # same trailing message repeats across chunks. Print it only
