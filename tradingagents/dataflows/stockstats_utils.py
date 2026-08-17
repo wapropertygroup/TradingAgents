@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 import time
 from typing import Annotated
 
@@ -179,13 +180,24 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # A cached file may be empty if a prior fetch failed (unknown symbol,
     # transient rate limit). Treat an empty/columnless cache as a miss and
     # re-fetch rather than serving the poisoned file forever.
+    #
+    # The read is also guarded against a concurrent writer. The market analyst
+    # requests up to 8 indicators in one turn and LangGraph's ToolNode runs them
+    # through ``executor.map``, so several threads hit this same path at once.
+    # Combined with the non-atomic write below, a reader could observe the file
+    # mid-truncation and raise EmptyDataError("No columns to parse from file"),
+    # failing the whole run. An unreadable cache is just a miss.
     data = None
     if os.path.exists(data_file):
-        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+        try:
+            cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError, UnicodeDecodeError):
+            cached = None
         # Serve the cache only when it is usable and not a stale snapshot of the
         # day being requested (#1150); otherwise fall through and refetch.
         if (
-            not cached.empty
+            cached is not None
+            and not cached.empty
             and "Close" in cached.columns
             and not _needs_same_day_refresh(data_file, curr_date_dt, today_date)
         ):
@@ -206,7 +218,24 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
             raise NoMarketDataError(
                 symbol, canonical, "Yahoo Finance returned no rows"
             )
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
+        # Write atomically. A plain to_csv truncates the file before refilling
+        # it, so a concurrent indicator thread (see the read above) can observe
+        # zero bytes; os.replace is atomic on POSIX and Windows, so a reader
+        # sees either the old file or the new one, never a partial write. This
+        # also means a process killed mid-write cannot leave a poisoned cache.
+        _tmp_fd, _tmp_path = tempfile.mkstemp(
+            dir=config["data_cache_dir"], suffix=".csv.tmp"
+        )
+        try:
+            with os.fdopen(_tmp_fd, "w", encoding="utf-8", newline="") as _fh:
+                downloaded.to_csv(_fh, index=False)
+            os.replace(_tmp_path, data_file)
+        except BaseException:
+            try:
+                os.unlink(_tmp_path)
+            except OSError:
+                pass
+            raise
         data = downloaded
 
     data = _clean_dataframe(data)
