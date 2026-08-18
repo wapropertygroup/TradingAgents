@@ -447,6 +447,13 @@ class TradingAgentsGraph:
             trace = []
             last_printed = None
             for chunk in self.graph.stream(init_agent_state, **args):
+                # Unconditionally: this list is what final_state is merged from.
+                # It used to live inside the debug/messages branch, which was
+                # harmless while only debug streamed, but silently produced an
+                # empty final_state once progress_callback could stream too --
+                # the run finished and then died in _log_state with
+                # KeyError: 'company_of_interest'.
+                trace.append(chunk)
                 if self.progress_callback is not None:
                     # Never let a progress consumer break the run: reporting is
                     # strictly less important than the analysis it describes.
@@ -454,7 +461,7 @@ class TradingAgentsGraph:
                         self.progress_callback(chunk)
                     except Exception:
                         logger.warning("progress_callback failed", exc_info=True)
-                if self.debug and chunk["messages"]:
+                if self.debug and chunk.get("messages"):
                     msg = chunk["messages"][-1]
                     # Nodes after the trader don't append to messages, so the
                     # same trailing message repeats across chunks. Print it only
@@ -463,7 +470,6 @@ class TradingAgentsGraph:
                     if signature != last_printed:
                         msg.pretty_print()
                         last_printed = signature
-                    trace.append(chunk)
             # Streamed chunks are per-node deltas. Merge them so the returned
             # state matches what graph.invoke() yields in the non-debug path.
             final_state = {}
