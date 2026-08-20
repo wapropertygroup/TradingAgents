@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows import a_stock
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
@@ -25,14 +26,38 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
 )
 
 
+def _load_ohlcv_for(symbol: str, curr_date: str) -> pd.DataFrame:
+    """OHLCV from whichever vendor can actually serve ``symbol``.
+
+    ``load_ohlcv`` is the *yfinance* loader, and Yahoo does not list 沪深京 codes
+    under their bare form — ``yf.download("002185")`` returns no rows, so every
+    A-share run died here with NoMarketDataError once the web UI stopped
+    rejecting the codes upfront. The vendor table in ``interface.py`` routes
+    A-shares to ``a_stock``, but this module imports the Yahoo loader directly
+    and so bypassed that routing entirely.
+
+    Dispatching on the symbol rather than adding a Yahoo suffix alias is
+    deliberate. Yahoo *does* serve ``002185.SZ``, but its rows are
+    dividend/split-adjusted, whereas the analyst's own price and indicator tools
+    reach the same stock through ``a_stock`` (后复权 from 东财, or unadjusted from
+    新浪 when 东财 throttles). This snapshot tells the analyst to treat itself as
+    the source of truth and to *flag* any tool output that disagrees with it — so
+    a snapshot built on a different adjustment basis than the tools it is meant
+    to check would manufacture a discrepancy on every A-share run.
+    """
+    if a_stock.is_a_share(symbol):
+        return a_stock.load_ohlcv(symbol, curr_date)
+    return load_ohlcv(symbol, curr_date)
+
+
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
 
-    ``load_ohlcv`` already normalizes the Date column and filters out
-    look-ahead rows, but we re-apply the cutoff defensively — this is a
-    verification path, so it must not trust its input to be pre-filtered.
+    The loaders already normalize the Date column and filter out look-ahead
+    rows, but we re-apply the cutoff defensively — this is a verification path,
+    so it must not trust its input to be pre-filtered.
     """
-    data = load_ohlcv(symbol, curr_date)
+    data = _load_ohlcv_for(symbol, curr_date)
     if data is None or data.empty:
         raise ValueError(f"No OHLCV data available for {symbol}.")
 
@@ -42,6 +67,10 @@ def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
     df = df[df["Date"] <= pd.to_datetime(curr_date)].sort_values("Date")
     if df.empty:
         raise ValueError(f"No OHLCV rows on or before {curr_date} for {symbol}.")
+    # Re-stamp last: copy(), dropna() and the slice above each return a new frame,
+    # and .attrs does not survive that on every pandas version. The A-share loader
+    # records its vendor and adjustment basis there, which the header renders.
+    df.attrs.update(data.attrs)
     return df
 
 
@@ -92,6 +121,15 @@ def build_verified_market_snapshot(
         f"- Requested analysis date: {curr_date}",
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",
+    ]
+    # An A-share snapshot must name its adjustment basis. 东财 serves 后复权 and
+    # 新浪 serves raw prices, the degrade between them is silent, and this block
+    # is what the analyst is told to trust absolutely — an unlabelled price level
+    # here is exactly the kind of unfalsifiable number the snapshot exists to
+    # prevent.
+    if df.attrs.get("source"):
+        lines.append(f"- {a_stock.basis_note(df)}")
+    lines += [
         "",
         "### Latest verified OHLCV row",
         "",

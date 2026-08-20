@@ -267,12 +267,16 @@ def load_ohlcv(symbol: str, curr_date: str | None = None) -> pd.DataFrame:
     return df
 
 
-def _basis_note(df: pd.DataFrame) -> str:
+def basis_note(df: pd.DataFrame) -> str:
     """State the adjustment basis of the rows actually returned.
 
     The two sources do not agree: 东财 here is 后复权, 新浪's K-line is raw. A
     header that says "后复权" over unadjusted rows is worse than no header, and
     the fallback fires silently whenever 东财 throttles.
+
+    Public because the verified-snapshot path renders the same provenance: it
+    tells the analyst to treat its numbers as ground truth, so it must say which
+    adjustment basis those numbers are on.
     """
     src = df.attrs.get("source")
     if src == "eastmoney":
@@ -296,7 +300,7 @@ def get_stock_data(symbol: str, start_date: str, end_date: str) -> str:
     title = f"{code} {name}".strip()      # no dangling space when the name is absent
     body = df.assign(Date=df["Date"].dt.strftime("%Y-%m-%d")).to_csv(index=False)
     return (f"# {title} 日线 ({start_date} → {end_date})\n"
-            f"# {_basis_note(df)}\n"
+            f"# {basis_note(df)}\n"
             f"{body}")
 
 

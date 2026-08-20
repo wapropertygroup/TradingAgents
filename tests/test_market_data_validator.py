@@ -74,3 +74,89 @@ class TestTool:
             {"symbol": "COF", "curr_date": "2026-05-20"}
         )
         assert "Verified market data snapshot for COF" in out
+
+
+def _a_share_frame(source: str = "sina") -> pd.DataFrame:
+    """A stub shaped like a real a_stock frame.
+
+    Column *order* differs from the yfinance frame — the A-share loader emits
+    Close third (Date, Open, Close, High, Low, Volume), as verified against live
+    新浪 data. The snapshot reads fields by name, so order does not matter; the
+    stub mirrors it anyway so a future order dependency fails here.
+    """
+    base = _sample_ohlcv()
+    frame = base[["Date", "Open", "Close", "High", "Low", "Volume"]].copy()
+    frame.attrs["source"] = source
+    frame.attrs["code"] = "002185"
+    return frame
+
+
+def _explode(*_args, **_kwargs):
+    raise AssertionError("wrong vendor called for this symbol")
+
+
+@pytest.mark.unit
+class TestAShareRouting:
+    """A-shares must reach the a_stock vendor, not Yahoo.
+
+    Yahoo does not list 沪深京 codes in their bare form, so the snapshot used to
+    die with NoMarketDataError("Yahoo Finance returned no rows") for every
+    A-share — this module imports the yfinance loader directly and so skipped the
+    vendor routing in interface.py.
+    """
+
+    def test_a_share_does_not_touch_yahoo(self, monkeypatch):
+        monkeypatch.setattr(validator, "load_ohlcv", _explode)
+        monkeypatch.setattr(validator.a_stock, "load_ohlcv",
+                            lambda s, d: _a_share_frame())
+
+        snap = validator.build_verified_market_snapshot("002185", "2026-05-20")
+        assert "Verified market data snapshot for 002185" in snap
+        assert "Latest trading row used: 2026-05-20" in snap
+        assert "boll_lb" in snap
+
+    @pytest.mark.parametrize("symbol", ["002185", "600519", "SH600519",
+                                        "600519.SS", "002185.SZ", "sz002185"])
+    def test_decorated_a_share_forms_all_route_to_a_stock(self, monkeypatch, symbol):
+        """Every form ystocker's _ASHARE_RE accepts must also route correctly."""
+        monkeypatch.setattr(validator, "load_ohlcv", _explode)
+        seen = []
+        monkeypatch.setattr(
+            validator.a_stock, "load_ohlcv",
+            lambda s, d: (seen.append(s), _a_share_frame())[1],
+        )
+
+        validator.build_verified_market_snapshot(symbol, "2026-05-20")
+        assert seen == [symbol]
+
+    def test_us_ticker_still_uses_yahoo(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(
+            validator, "load_ohlcv",
+            lambda s, d: (seen.append(s), _sample_ohlcv())[1],
+        )
+        monkeypatch.setattr(validator.a_stock, "load_ohlcv", _explode)
+
+        validator.build_verified_market_snapshot("COF", "2026-05-20")
+        assert seen == ["COF"]
+
+    @pytest.mark.parametrize("source,expected", [
+        ("eastmoney", "后复权"),
+        ("sina", "不复权"),
+    ])
+    def test_snapshot_states_the_adjustment_basis(self, monkeypatch, source, expected):
+        """The block the analyst is told to trust must say which basis it is on.
+
+        东财 is 后复权, 新浪 is raw, and the degrade between them is silent.
+        """
+        monkeypatch.setattr(validator, "load_ohlcv", _explode)
+        monkeypatch.setattr(validator.a_stock, "load_ohlcv",
+                            lambda s, d: _a_share_frame(source))
+
+        snap = validator.build_verified_market_snapshot("002185", "2026-05-20")
+        assert expected in snap
+
+    def test_no_basis_line_for_symbols_without_provenance(self, monkeypatch):
+        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
+        snap = validator.build_verified_market_snapshot("COF", "2026-05-20")
+        assert "复权" not in snap
