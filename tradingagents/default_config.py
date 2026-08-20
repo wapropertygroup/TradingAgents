@@ -130,11 +130,24 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # The configured value is the exact vendor chain — requests are NOT silently
     # routed to vendors you didn't choose. For ordered fallback, list several,
     # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
+    # ``a_stock`` (沪深京 via 东财/新浪/同花顺) leads the four core chains, and that
+    # order is deliberate.
+    #
+    # It is the only vendor that can decline from the symbol alone: anything that
+    # is not a 6-digit A-share code is refused by string inspection, with no
+    # network call, so a US ticker falls straight through to yfinance. yfinance
+    # cannot do the reverse — asked for 600519 it does not raise, it *succeeds*
+    # with "No news found for 600519", and because the router stops at the first
+    # success an A-share would silently receive an empty answer from the wrong
+    # vendor. Putting the self-selecting vendor first removes that failure mode.
+    #
+    # Registering in VENDOR_METHODS is not sufficient on its own: an explicit
+    # chain here IS the whole chain, so an unlisted vendor is never tried.
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "core_stock_apis": "a_stock,yfinance",       # Options: alpha_vantage, yfinance, a_stock
+        "technical_indicators": "a_stock,yfinance",  # Options: alpha_vantage, yfinance, a_stock
+        "fundamental_data": "a_stock,yfinance",      # Options: alpha_vantage, yfinance, a_stock
+        "news_data": "a_stock,yfinance",             # Options: alpha_vantage, yfinance, a_stock
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

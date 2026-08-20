@@ -17,6 +17,17 @@ from .errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
+from .a_stock import (
+    get_balance_sheet as get_astock_balance_sheet,
+    get_cashflow as get_astock_cashflow,
+    get_fundamentals as get_astock_fundamentals,
+    get_global_news as get_astock_global_news,
+    get_income_statement as get_astock_income_statement,
+    get_indicators as get_astock_indicators,
+    get_insider_transactions as get_astock_insider_transactions,
+    get_news as get_astock_news,
+    get_stock_data as get_astock_stock_data,
+)
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
@@ -82,6 +93,11 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    # A-share (沪深京) over 东财/新浪/同花顺. Listed last, and last in each method
+    # dict below, so it is only reached once the other vendors have declined —
+    # it refuses anything that is not a 6-digit A-share code, so a US ticker
+    # never touches it.
+    "a_stock",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -97,41 +113,50 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "a_stock": get_astock_stock_data,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "a_stock": get_astock_indicators,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "a_stock": get_astock_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "a_stock": get_astock_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "a_stock": get_astock_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "a_stock": get_astock_income_statement,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "a_stock": get_astock_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "a_stock": get_astock_global_news,
     },
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+        "a_stock": get_astock_insider_transactions,
     },
     # macro_data
     "get_macro_indicators": {
