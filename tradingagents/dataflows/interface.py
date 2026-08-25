@@ -27,6 +27,14 @@ from .a_stock import (
     get_insider_transactions as get_astock_insider_transactions,
     get_news as get_astock_news,
     get_stock_data as get_astock_stock_data,
+    get_concept_blocks as get_astock_concept_blocks,
+    get_dragon_tiger_board as get_astock_dragon_tiger_board,
+    get_fund_flow as get_astock_fund_flow,
+    get_hot_stocks as get_astock_hot_stocks,
+    get_industry_comparison as get_astock_industry_comparison,
+    get_lockup_expiry as get_astock_lockup_expiry,
+    get_northbound_flow as get_astock_northbound_flow,
+    get_profit_forecast as get_astock_profit_forecast,
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
@@ -85,7 +93,15 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_prediction_markets",
         ]
-    }
+    },
+    "signal_data": {
+        "description": "A-share forecasts, capital flow, Dragon-Tiger, and lock-up data",
+        "tools": [
+            "get_profit_forecast", "get_hot_stocks", "get_northbound_flow",
+            "get_concept_blocks", "get_fund_flow", "get_dragon_tiger_board",
+            "get_lockup_expiry", "get_industry_comparison",
+        ],
+    },
 }
 
 VENDOR_LIST = [
@@ -166,6 +182,14 @@ VENDOR_METHODS = {
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
     },
+    "get_profit_forecast": {"a_stock": get_astock_profit_forecast},
+    "get_hot_stocks": {"a_stock": get_astock_hot_stocks},
+    "get_northbound_flow": {"a_stock": get_astock_northbound_flow},
+    "get_concept_blocks": {"a_stock": get_astock_concept_blocks},
+    "get_fund_flow": {"a_stock": get_astock_fund_flow},
+    "get_dragon_tiger_board": {"a_stock": get_astock_dragon_tiger_board},
+    "get_lockup_expiry": {"a_stock": get_astock_lockup_expiry},
+    "get_industry_comparison": {"a_stock": get_astock_industry_comparison},
 }
 
 def get_category_for_method(method: str) -> str:

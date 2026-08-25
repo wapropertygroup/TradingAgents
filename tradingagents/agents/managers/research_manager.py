@@ -20,6 +20,11 @@ def create_research_manager(llm):
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
         history = state["investment_debate_state"].get("history", "")
+        astock_reports = "\n".join([
+            "Policy report: " + state.get("policy_report", ""),
+            "Hot money / capital-flow report: " + state.get("hot_money_report", ""),
+            "Lock-up / insider-reduction report: " + state.get("lockup_report", ""),
+        ])
 
         investment_debate_state = state["investment_debate_state"]
 
@@ -42,6 +47,13 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 
 **Debate History:**
 {history}
+
+**A-share specialist evidence (when present):**
+{astock_reports}
+
+Explicitly reconcile policy direction, speculative capital flow, and potential
+unlock/reduction supply shocks; do not let an omitted debate reference erase a
+specialist report.
 
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction()
 

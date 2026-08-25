@@ -44,6 +44,16 @@ dev = [
 bedrock = [
     "langchain-aws>=1.5.0",
 ]
+# Runtime dependencies used by the optional mootdx A-share transport. mootdx
+# itself is installed with --no-deps by deploy/install-tradingagents.sh because
+# its metadata pins httpx<0.26 while Gemini requires httpx>=0.28.1. TDX quotes
+# use the binary TCP client; failures fall through to Eastmoney and Sina.
+astock = [
+    "tdxpy>=0.2.5,<0.3.0",
+    "prettytable>=3.5,<4",
+    "py-mini-racer>=0.6,<0.7",
+    "click>=8.1,<9",
+]
 
 [project.scripts]
 tradingagents = "cli.main:app"

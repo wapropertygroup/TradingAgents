@@ -49,6 +49,24 @@ class ConditionalLogic:
             return "tools_fundamentals"
         return "Msg Clear Fundamentals"
 
+    def should_continue_policy(self, state: AgentState):
+        """Determine if policy analysis should continue its tool loop."""
+        if state["messages"][-1].tool_calls:
+            return "tools_policy"
+        return "Msg Clear Policy"
+
+    def should_continue_hot_money(self, state: AgentState):
+        """Determine if hot-money analysis should continue its tool loop."""
+        if state["messages"][-1].tool_calls:
+            return "tools_hot_money"
+        return "Msg Clear Hot Money"
+
+    def should_continue_lockup(self, state: AgentState):
+        """Determine if lock-up analysis should continue its tool loop."""
+        if state["messages"][-1].tool_calls:
+            return "tools_lockup"
+        return "Msg Clear Lock-up"
+
     def should_continue_debate(self, state: AgentState) -> str:
         """Determine if debate should continue."""
 

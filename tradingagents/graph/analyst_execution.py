@@ -50,6 +50,27 @@ ANALYST_NODE_SPECS: dict[str, AnalystNodeSpec] = {
         tool_node="tools_fundamentals",
         report_key="fundamentals_report",
     ),
+    "policy": AnalystNodeSpec(
+        key="policy",
+        agent_node="Policy Analyst",
+        clear_node="Msg Clear Policy",
+        tool_node="tools_policy",
+        report_key="policy_report",
+    ),
+    "hot_money": AnalystNodeSpec(
+        key="hot_money",
+        agent_node="Hot Money Tracker",
+        clear_node="Msg Clear Hot Money",
+        tool_node="tools_hot_money",
+        report_key="hot_money_report",
+    ),
+    "lockup": AnalystNodeSpec(
+        key="lockup",
+        agent_node="Lock-up Monitor",
+        clear_node="Msg Clear Lock-up",
+        tool_node="tools_lockup",
+        report_key="lockup_report",
+    ),
 }
 
 

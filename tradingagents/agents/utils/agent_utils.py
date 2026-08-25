@@ -23,6 +23,16 @@ from tradingagents.agents.utils.news_data_tools import (
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
+from tradingagents.agents.utils.signal_data_tools import (
+    get_concept_blocks,
+    get_dragon_tiger_board,
+    get_fund_flow,
+    get_hot_stocks,
+    get_industry_comparison,
+    get_lockup_expiry,
+    get_northbound_flow,
+    get_profit_forecast,
+)
 
 # Public surface: the data tools are imported here so agents and the graph
 # import them from one place, plus the instrument/language helpers defined below.
@@ -39,6 +49,14 @@ __all__ = [
     "get_macro_indicators",
     "get_prediction_markets",
     "get_verified_market_snapshot",
+    "get_profit_forecast",
+    "get_hot_stocks",
+    "get_northbound_flow",
+    "get_concept_blocks",
+    "get_fund_flow",
+    "get_dragon_tiger_board",
+    "get_lockup_expiry",
+    "get_industry_comparison",
     "build_instrument_context",
     "resolve_instrument_identity",
     "get_instrument_context_from_state",
@@ -212,6 +230,5 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
 
 

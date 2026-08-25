@@ -148,6 +148,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "a_stock,yfinance",  # Options: alpha_vantage, yfinance, a_stock
         "fundamental_data": "a_stock,yfinance",      # Options: alpha_vantage, yfinance, a_stock
         "news_data": "a_stock,yfinance",             # Options: alpha_vantage, yfinance, a_stock
+        "signal_data": "a_stock",             # A-share only, free direct sources
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

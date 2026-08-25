@@ -1,0 +1,12 @@
+TradingAgents A-share extensions
+Copyright 2026 15th-Ave-NE contributors
+
+This product includes capability-level adaptations from TradingAgents-Astock
+(https://github.com/simonlin1212/TradingAgents-astock), Copyright 2026 Simon,
+licensed under the Apache License, Version 2.0.
+
+TradingAgents-Astock is itself derived from TauricResearch/TradingAgents,
+Copyright 2024-2026 TauricResearch, under the Apache License, Version 2.0.
+
+Adapted portions include the policy, hot-money, and lock-up analyst concepts;
+A-share signal data tools; and mainland-China trading constraints.

@@ -20,6 +20,14 @@ from tradingagents.agents.utils.agent_utils import (
     get_income_statement,
     get_indicators,
     get_insider_transactions,
+    get_concept_blocks,
+    get_dragon_tiger_board,
+    get_fund_flow,
+    get_hot_stocks,
+    get_industry_comparison,
+    get_lockup_expiry,
+    get_northbound_flow,
+    get_profit_forecast,
     get_macro_indicators,
     get_news,
     get_prediction_markets,
@@ -229,6 +237,30 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                    get_profit_forecast,
+                    get_industry_comparison,
+                ]
+            ),
+            "policy": ToolNode([get_news, get_global_news]),
+            "hot_money": ToolNode(
+                [
+                    get_stock_data,
+                    get_news,
+                    get_insider_transactions,
+                    get_hot_stocks,
+                    get_northbound_flow,
+                    get_concept_blocks,
+                    get_fund_flow,
+                    get_dragon_tiger_board,
+                    get_industry_comparison,
+                ]
+            ),
+            "lockup": ToolNode(
+                [
+                    get_insider_transactions,
+                    get_news,
+                    get_fundamentals,
+                    get_lockup_expiry,
                 ]
             ),
         }

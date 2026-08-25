@@ -40,6 +40,15 @@ class AnalystExecutionPlanTests(unittest.TestCase):
         self.assertEqual(spec.agent_node, "Sentiment Analyst")
         self.assertEqual(spec.report_key, "sentiment_report")
 
+    def test_astock_plan_has_all_seven_analysts_in_order(self):
+        keys = ["market", "social", "news", "fundamentals", "policy", "hot_money", "lockup"]
+        plan = build_analyst_execution_plan(keys)
+
+        self.assertEqual([spec.key for spec in plan.specs], keys)
+        self.assertEqual(plan.specs[4].report_key, "policy_report")
+        self.assertEqual(plan.specs[5].agent_node, "Hot Money Tracker")
+        self.assertEqual(plan.specs[6].agent_node, "Lock-up Monitor")
+
 
 class AnalystWallTimeTrackerTests(unittest.TestCase):
     def test_records_wall_time_when_analyst_completes(self):

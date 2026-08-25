@@ -1,6 +1,9 @@
 from .analysts.fundamentals_analyst import create_fundamentals_analyst
 from .analysts.market_analyst import create_market_analyst
 from .analysts.news_analyst import create_news_analyst
+from .analysts.policy_analyst import create_policy_analyst
+from .analysts.hot_money_tracker import create_hot_money_tracker
+from .analysts.lockup_watcher import create_lockup_watcher
 from .analysts.sentiment_analyst import (
     create_sentiment_analyst,
     create_social_media_analyst,  # deprecated alias kept for back-compat
@@ -28,6 +31,9 @@ __all__ = [
     "create_market_analyst",
     "create_neutral_debator",
     "create_news_analyst",
+    "create_policy_analyst",
+    "create_hot_money_tracker",
+    "create_lockup_watcher",
     "create_aggressive_debator",
     "create_portfolio_manager",
     "create_conservative_debator",

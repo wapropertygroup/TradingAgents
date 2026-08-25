@@ -14,17 +14,11 @@ Sources, all direct and keyless:
 Derived from the A-share adapter in TradingAgents-astock (Apache-2.0, see
 NOTICE), with two deliberate departures:
 
-**mootdx is not used.** The upstream adapter reads OHLCV over the TDX binary
-protocol via ``mootdx``. That was dropped, not because it fails — all ten TDX
-servers are reachable from this deployment and return real bars — but because
-``mootdx`` pins ``httpx>=0.25,<0.26`` while ``langchain-google-genai`` requires
-``httpx>=0.28.1``, and this deployment runs Gemini. No version satisfies both.
-The upstream workaround ("mootdx does not import httpx at runtime") does not
-hold: importing ``mootdx.quotes`` puts ``httpx`` in ``sys.modules``. Measured
-against that, 东财 alone returns 5987 daily bars for 600519 back to 2001-08-27
-in about two seconds, and its search endpoint resolves 名称→代码, which were
-mootdx's two jobs here. Dropping it also removes the TDX server table, the
-reachability probing and the negative caching that came with it.
+**mootdx is optional.** It is attempted first for OHLCV when installed, but its
+upstream package metadata pins an old ``httpx`` that conflicts with Gemini.
+Deployment therefore installs it without dependency resolution and keeps the
+modern Gemini-compatible ``httpx``. Import, connection, or protocol failures
+are negatively cached and fall through to 东财 then 新浪; they never abort a run.
 
 **Adjustment is 后复权, never 前复权.** 东财's ``fqt=1`` (前复权) rebases from
 today's price, so a long history of a heavily-dividend-paying stock goes
@@ -40,9 +34,15 @@ so a US ticker is served by yfinance and never touches these endpoints.
 from __future__ import annotations
 
 import io
+import json
 import logging
+import os
+import random
 import re
+import socket
+import threading
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
@@ -62,6 +62,10 @@ _EM_HEADERS = {"User-Agent": _UA, "Accept": "*/*",
 
 _TIMEOUT = 15
 _RETRIES = 3
+_EM_MIN_INTERVAL = float(os.environ.get("EM_MIN_INTERVAL", "1.0"))
+_EM_SESSION = requests.Session()
+_EM_LAST_CALL = 0.0
+_EM_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Symbols
@@ -136,8 +140,20 @@ def _http(url: str, *, params: dict | None = None, encoding: str | None = None,
     last: Exception | None = None
     for attempt in range(_RETRIES):
         try:
-            resp = requests.get(url, params=params, timeout=_TIMEOUT,
-                                headers=headers or _EM_HEADERS)
+            if "eastmoney.com" in url:
+                global _EM_LAST_CALL
+                with _EM_LOCK:
+                    wait = _EM_MIN_INTERVAL - (time.monotonic() - _EM_LAST_CALL)
+                    if wait > 0:
+                        time.sleep(wait + random.uniform(0.1, 0.5))
+                    resp = _EM_SESSION.get(
+                        url, params=params, timeout=_TIMEOUT,
+                        headers=headers or _EM_HEADERS,
+                    )
+                    _EM_LAST_CALL = time.monotonic()
+            else:
+                resp = requests.get(url, params=params, timeout=_TIMEOUT,
+                                    headers=headers or _EM_HEADERS)
             if resp.status_code == 429:
                 raise VendorRateLimitError(f"{url} returned 429")
             resp.raise_for_status()
@@ -221,11 +237,71 @@ def _fetch_kline_sina(code: str, datalen: int = 1023) -> pd.DataFrame:
     return df
 
 
+_MOOTDX_UNAVAILABLE_UNTIL = 0.0
+_TDX_SERVERS = (
+    ("119.97.185.59", 7709),
+    ("124.70.133.119", 7709),
+    ("116.205.183.150", 7709),
+)
+
+
+def _fetch_kline_mootdx(code: str) -> pd.DataFrame:
+    """Fetch recent daily bars over TDX TCP, failing quickly when unavailable."""
+    global _MOOTDX_UNAVAILABLE_UNTIL
+    if os.environ.get("TRADINGAGENTS_MOOTDX_ENABLED", "1").lower() in {"0", "false", "off"}:
+        raise RuntimeError("mootdx disabled")
+    if time.monotonic() < _MOOTDX_UNAVAILABLE_UNTIL:
+        raise RuntimeError("mootdx temporarily unavailable")
+    try:
+        from mootdx.quotes import Quotes
+
+        frame = None
+        for server in _TDX_SERVERS:
+            try:
+                with socket.create_connection(server, timeout=1.5):
+                    pass
+                client = Quotes.factory(market="std", server=server)
+                candidate = client.bars(symbol=code, category=4, offset=800)
+                if candidate is not None and not candidate.empty:
+                    frame = candidate
+                    break
+            except Exception:
+                continue
+        if frame is None or frame.empty:
+            raise RuntimeError("mootdx returned no bars from bounded server list")
+        frame = frame.drop(
+            columns=["datetime", "year", "month", "day", "hour", "minute"],
+            errors="ignore",
+        ).reset_index()
+        frame = frame.rename(columns={
+            "datetime": "Date", "open": "Open", "close": "Close",
+            "high": "High", "low": "Low", "volume": "Volume",
+        })
+        frame = frame[["Date", "Open", "High", "Low", "Close", "Volume"]]
+        frame.attrs["name"] = ""
+        return frame
+    except Exception:
+        _MOOTDX_UNAVAILABLE_UNTIL = time.monotonic() + 300
+        raise
+
+
+_OHLCV_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
+
+
 def _clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     # copy() does not carry .attrs across on every pandas version, so the name
     # the kline payload supplied has to be reattached explicitly.
     out.attrs.update(df.attrs)
+    # These endpoints break by changing their field list, not by going down: the
+    # row parser then skips every line and hands over a frame with no columns at
+    # all. Reporting that as this vendor's own error is what lets the caller fall
+    # through to the next source — a bare KeyError escapes the fallback chain and
+    # aborts the run, which the module docstring promises never happens.
+    missing = [c for c in _OHLCV_COLUMNS if c not in out.columns]
+    if missing:
+        raise NoMarketDataError(
+            "", None, f"kline payload missing {', '.join(missing)}")
     out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
     for col in ("Open", "High", "Low", "Close", "Volume"):
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -240,19 +316,24 @@ def _clean_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_ohlcv(symbol: str, curr_date: str | None = None) -> pd.DataFrame:
-    """Daily OHLCV for an A-share, 东财 first and 新浪 as fallback.
+    """Daily OHLCV for an A-share, mootdx → 东财 → 新浪.
 
     Trimmed at ``curr_date`` so a backtest cannot see past its own date; the
     upstream adapter calls the same thing a look-ahead guard.
     """
     code = _require_a_share(symbol)
     try:
-        df = _clean_ohlcv(_fetch_kline_em(code))
-        source = "eastmoney"
-    except (VendorRateLimitError, NoMarketDataError) as exc:
-        logger.warning("a_stock: 东财 kline failed for %s (%s); trying 新浪", code, exc)
-        df = _clean_ohlcv(_fetch_kline_sina(code))
-        source = "sina"
+        df = _clean_ohlcv(_fetch_kline_mootdx(code))
+        source = "mootdx"
+    except Exception as exc:  # optional dependency / TCP source
+        logger.info("a_stock: mootdx unavailable for %s (%s); trying 东财", code, exc)
+        try:
+            df = _clean_ohlcv(_fetch_kline_em(code))
+            source = "eastmoney"
+        except (VendorRateLimitError, NoMarketDataError) as em_exc:
+            logger.warning("a_stock: 东财 kline failed for %s (%s); trying 新浪", code, em_exc)
+            df = _clean_ohlcv(_fetch_kline_sina(code))
+            source = "sina"
     name = df.attrs.get("name") or ""
     if curr_date:
         cutoff = pd.to_datetime(curr_date, errors="coerce")
@@ -284,6 +365,8 @@ def basis_note(df: pd.DataFrame) -> str:
     if src == "sina":
         return ("复权方式: 不复权 (新浪原始K线) · 数据源: 新浪财经 "
                 "— 东财限流时的降级源，除权日附近的跳空未做还原")
+    if src == "mootdx":
+        return "复权方式: 通达信日线 · 数据源: mootdx/通达信 TCP"
     return f"数据源: {src or 'unknown'}"
 
 
@@ -596,3 +679,220 @@ def get_insider_transactions(ticker: str, curr_date: str | None = None) -> str:
     if len(md) == 2:
         raise NoMarketDataError(symbol, code, "no executive changes at or before that date")
     return (f"## {code} 高管持股变动（东方财富）\n\n" + "\n".join(md) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# A-share signal layer (政策/游资/解禁 analysts)
+# ---------------------------------------------------------------------------
+
+def _historical_notice(curr_date: str | None, label: str) -> str:
+    """Warn when a current-only source is used for a historical analysis."""
+    if not curr_date:
+        return ""
+    try:
+        historical = datetime.strptime(str(curr_date)[:10], "%Y-%m-%d").date() < datetime.now().date()
+    except ValueError:
+        historical = False
+    if not historical:
+        return ""
+    return (
+        f"⚠️ 未来函数警告：以下{label}是当前快照，不是 {str(curr_date)[:10]} "
+        "当日的历史版本；不得把它描述为分析日已知事实。\n\n"
+    )
+
+
+def _datacenter(report_name: str, *, filter_str: str = "", page_size: int = 50,
+                sort_columns: str = "", sort_types: str = "-1") -> list[dict[str, Any]]:
+    data = _em_json("https://datacenter-web.eastmoney.com/api/data/v1/get", {
+        "reportName": report_name,
+        "columns": "ALL",
+        "filter": filter_str,
+        "pageNumber": 1,
+        "pageSize": page_size,
+        "sortColumns": sort_columns,
+        "sortTypes": sort_types,
+        "source": "WEB",
+        "client": "WEB",
+    })
+    return (((data.get("result") or {}).get("data")) or [])
+
+
+def get_profit_forecast(ticker: str, curr_date: str | None = None) -> str:
+    """Consensus EPS forecast from Tonghuashun, with explicit snapshot basis."""
+    code = _require_a_share(ticker)
+    table = _eps_forecast_ths(code)
+    if not table:
+        return f"NO_DATA_AVAILABLE: 同花顺无 {code} 一致预期覆盖。"
+    return (
+        _historical_notice(curr_date, "分析师一致预期")
+        + f"## {code} 一致预期（同花顺当前快照）\n\n{table}\n"
+    )
+
+
+def get_hot_stocks(curr_date: str = "") -> str:
+    """Strong-stock list with Tonghuashun editorial theme attribution."""
+    day = curr_date or datetime.now().strftime("%Y-%m-%d")
+    text = _http(
+        f"http://zx.10jqka.com.cn/event/api/getharden/date/{day}/"
+        "orderby/date/orderway/desc/charset/GBK/",
+        headers={"User-Agent": _UA},
+    )
+    payload = json.loads(text)
+    rows = payload.get("data") or []
+    if not rows:
+        return f"NO_DATA_AVAILABLE: 同花顺 {day} 无强势股数据（可能为非交易日）。"
+    lines = [f"## {day} 强势股与题材归因（同花顺）", ""]
+    for row in rows[:80]:
+        lines.append(
+            f"- {row.get('code', '')} {row.get('name', '')}: "
+            f"涨幅 {row.get('zhangfu', '—')}%，换手 {row.get('huanshou', '—')}%，"
+            f"题材：{row.get('reason', '—')}"
+        )
+    return "\n".join(lines)
+
+
+def get_northbound_flow(curr_date: str, include_history: bool = False) -> str:
+    """Current northbound flow from Tonghuashun; never backdate the snapshot."""
+    text = _http(
+        "https://data.hexin.cn/market/hsgtApi/method/dayChart/",
+        headers={"User-Agent": _UA, "Referer": "https://data.hexin.cn/"},
+    )
+    payload = json.loads(text)
+    times, hgt, sgt = payload.get("time") or [], payload.get("hgt") or [], payload.get("sgt") or []
+    if not times:
+        return "NO_DATA_AVAILABLE: 同花顺北向资金当前无数据（可能为休市时段）。"
+    h_last = float(hgt[-1]) if hgt else 0.0
+    s_last = float(sgt[-1]) if sgt else 0.0
+    total = h_last + s_last
+    rows = [
+        _historical_notice(curr_date, "北向资金") + "## 北向资金（同花顺当前快照）",
+        f"- 沪股通累计净额：{h_last:.2f} 亿元",
+        f"- 深股通累计净额：{s_last:.2f} 亿元",
+        f"- 合计：{total:.2f} 亿元",
+    ]
+    if include_history:
+        rows.append("- 历史序列：该免费接口仅保证当前日内快照，未伪造历史值。")
+    return "\n".join(rows)
+
+
+def get_concept_blocks(ticker: str) -> str:
+    """Concept and industry membership from Baidu Stock Market."""
+    code = _require_a_share(ticker)
+    url = "https://finance.pae.baidu.com/api/getrelatedblock"
+    stock = json.dumps(
+        [{"code": code, "market": "ab", "type": "stock"}],
+        ensure_ascii=False,
+    )
+    text = _http(url, params={"stock": stock, "finClientType": "pc"}, headers={
+        "User-Agent": _UA, "Accept": "application/vnd.finance-web.v1+json",
+        "Referer": "https://gushitong.baidu.com/",
+    })
+    payload = json.loads(text)
+    groups = (payload.get("Result") or {}).get(code) or []
+    if str(payload.get("ResultCode", -1)) != "0" or not groups:
+        return f"NO_DATA_AVAILABLE: 百度股市通无 {code} 板块归属。"
+    lines = [f"## {code} 所属板块（百度股市通）"]
+    for group in groups:
+        values = [f"{item.get('name', '')} {item.get('ratio', '')}" for item in group.get("list") or []]
+        if values:
+            lines.append(f"- {group.get('name', '分类')}：" + "；".join(values))
+    return "\n".join(lines)
+
+
+def get_fund_flow(ticker: str, curr_date: str, include_history: bool = True) -> str:
+    """Main/large/medium/small order flow from Eastmoney push2."""
+    code = _require_a_share(ticker)
+    lines = [f"## {code} 个股资金流（东方财富）"]
+    historical = bool(_historical_notice(curr_date, "实时资金流"))
+    if historical:
+        lines.append("分析日期早于今天，已略去当前日内资金流。")
+    else:
+        data = _em_json("https://push2.eastmoney.com/api/qt/stock/fflow/kline/get", {
+            "secid": _secid(code), "klt": 1,
+            "fields1": "f1,f2,f3,f7", "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        })
+        klines = (data.get("data") or {}).get("klines") or []
+        if klines:
+            parts = klines[-1].split(",")
+            if len(parts) >= 6:
+                lines.append(
+                    f"- {parts[0]} 主力净流入 {float(parts[1])/1e4:.0f} 万元；"
+                    f"大单 {float(parts[4])/1e4:.0f} 万元；超大单 {float(parts[5])/1e4:.0f} 万元"
+                )
+    if include_history:
+        data = _em_json("https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get", {
+            "secid": _secid(code), "lmt": 60, "klt": 101,
+            "fields1": "f1,f2,f3,f7", "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        })
+        history = (data.get("data") or {}).get("klines") or []
+        cutoff = str(curr_date)[:10]
+        history = [row for row in history if not cutoff or row.split(",")[0] <= cutoff][-20:]
+        lines.extend(f"- 日级：{row}" for row in history)
+    if len(lines) == 1:
+        return f"NO_DATA_AVAILABLE: 东方财富无 {code} 资金流数据。"
+    return "\n".join(lines)
+
+
+def get_dragon_tiger_board(ticker: str, curr_date: str, look_back_days: int = 30) -> str:
+    """Dragon-Tiger appearances and top seats from Eastmoney Datacenter."""
+    code = _require_a_share(ticker)
+    end = datetime.strptime(str(curr_date)[:10], "%Y-%m-%d")
+    start = (end - pd.Timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+    rows = _datacenter(
+        "RPT_DAILYBILLBOARD_DETAILSNEW",
+        filter_str=(f"(TRADE_DATE>='{start}')(TRADE_DATE<='{end:%Y-%m-%d}')"
+                    f'(SECURITY_CODE="{code}")'),
+        sort_columns="TRADE_DATE",
+    )
+    if not rows:
+        return f"## {code} 龙虎榜（东方财富）\n\n近 {look_back_days} 日未查到上榜记录。"
+    lines = [f"## {code} 龙虎榜（东方财富，近 {look_back_days} 日）"]
+    for row in rows:
+        lines.append(
+            f"- {str(row.get('TRADE_DATE', ''))[:10]}：{row.get('EXPLANATION', '—')}；"
+            f"净买入 {(row.get('BILLBOARD_NET_AMT') or 0)/1e4:.0f} 万元；"
+            f"换手 {row.get('TURNOVERRATE', '—')}%"
+        )
+    return "\n".join(lines)
+
+
+def get_lockup_expiry(ticker: str, curr_date: str, forward_days: int = 90) -> str:
+    """Restricted-share unlock history and forward calendar."""
+    code = _require_a_share(ticker)
+    end = datetime.strptime(str(curr_date)[:10], "%Y-%m-%d") + pd.Timedelta(days=forward_days)
+    rows = _datacenter(
+        "RPT_LIFT_STAGE",
+        filter_str=(f'(SECURITY_CODE="{code}")(FREE_DATE>="{str(curr_date)[:10]}")'
+                    f'(FREE_DATE<="{end:%Y-%m-%d}")'),
+        sort_columns="FREE_DATE", sort_types="1",
+    )
+    if not rows:
+        return f"## {code} 限售解禁（东方财富）\n\n未来 {forward_days} 日未查到待解禁记录。"
+    lines = [f"## {code} 未来 {forward_days} 日限售解禁（东方财富）"]
+    for row in rows:
+        lines.append(
+            f"- {str(row.get('FREE_DATE', ''))[:10]}："
+            f"{row.get('LIMITED_STOCK_TYPE', '类型未知')}；"
+            f"数量 {row.get('FREE_SHARES_NUM', '—')}；占比 {row.get('FREE_RATIO', '—')}"
+        )
+    return "\n".join(lines)
+
+
+def get_industry_comparison(ticker: str, curr_date: str) -> str:
+    """Current Eastmoney industry ranking with historical-snapshot warning."""
+    code = _require_a_share(ticker)
+    data = _em_json("https://push2.eastmoney.com/api/qt/clist/get", {
+        "pn": 1, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+        "fs": "m:90+t:2", "fields": "f3,f12,f14,f104,f105,f140",
+    })
+    rows = (data.get("data") or {}).get("diff") or []
+    if not rows:
+        return "NO_DATA_AVAILABLE: 东方财富当前无行业排名。"
+    lines = [_historical_notice(curr_date, "行业排名") + f"## {code} 行业横向比较（东方财富当前快照）"]
+    for index, row in enumerate(rows[:30], 1):
+        lines.append(
+            f"- {index}. {row.get('f14', '—')}：{row.get('f3', '—')}%；"
+            f"上涨 {row.get('f104', '—')} / 下跌 {row.get('f105', '—')}；"
+            f"领涨 {row.get('f140', '—')}"
+        )
+    return "\n".join(lines)

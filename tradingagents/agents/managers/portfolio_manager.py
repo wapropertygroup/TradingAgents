@@ -20,6 +20,16 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.a_stock import is_a_share
+
+
+_A_SHARE_FINAL_CONSTRAINTS = """
+This is a mainland China A-share. The final action must respect T+1, the
+applicable 5%/10%/20% daily price limit, 100-share buy lots, market sessions,
+suspension/delisting status, and margin eligibility. An unlock is potential
+supply rather than proof of a sale. Do not state an executable price unless the
+provided evidence supports it.
+"""
 
 
 def create_portfolio_manager(llm):
@@ -32,6 +42,11 @@ def create_portfolio_manager(llm):
         risk_debate_state = state["risk_debate_state"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        market_constraints = (
+            _A_SHARE_FINAL_CONSTRAINTS
+            if is_a_share(state["company_of_interest"])
+            else ""
+        )
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -63,6 +78,8 @@ def create_portfolio_manager(llm):
 ---
 
 Be decisive and ground every conclusion in specific evidence from the analysts.
+
+{market_constraints}
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 

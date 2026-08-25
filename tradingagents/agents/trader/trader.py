@@ -16,6 +16,17 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.a_stock import is_a_share
+
+
+_A_SHARE_CONSTRAINTS = """
+For this mainland China A-share, obey market mechanics: T+1 settlement for
+shares bought today; board-specific daily price limits (normally 10%, 20% for
+STAR/ChiNext, 5% for ST names, subject to listing-day exceptions); orders in
+100-share lots except permitted odd-lot sales; Shanghai/Shenzhen trading
+sessions and auction windows; suspension/delisting risk; and margin eligibility.
+Do not invent an executable price or imply same-day round trips are available.
+"""
 
 
 def create_trader(llm):
@@ -25,6 +36,7 @@ def create_trader(llm):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
+        market_constraints = _A_SHARE_CONSTRAINTS if is_a_share(company_name) else ""
 
         messages = [
             {
@@ -33,6 +45,7 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan. "
+                    + market_constraints
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
                 ),

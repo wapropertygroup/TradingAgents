@@ -11,11 +11,14 @@ from tradingagents.agents import (
     create_bull_researcher,
     create_conservative_debator,
     create_fundamentals_analyst,
+    create_hot_money_tracker,
+    create_lockup_watcher,
     create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
     create_news_analyst,
     create_portfolio_manager,
+    create_policy_analyst,
     create_research_manager,
     create_sentiment_analyst,
     create_trader,
@@ -77,6 +80,9 @@ class GraphSetup:
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+            "policy": lambda: create_policy_analyst(self.quick_thinking_llm),
+            "hot_money": lambda: create_hot_money_tracker(self.quick_thinking_llm),
+            "lockup": lambda: create_lockup_watcher(self.quick_thinking_llm),
         }
 
         # Create researcher and manager nodes
