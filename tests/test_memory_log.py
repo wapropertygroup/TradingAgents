@@ -854,6 +854,14 @@ class TestLegacyRemoval:
         mock_graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "mem.md")})
         mock_graph.log_states_dict = {}
         mock_graph.debug = False
+        # MagicMock auto-creates every attribute, so progress_callback would be a
+        # non-None mock and _run_graph would take its *streaming* branch, where
+        # iter(MagicMock()) yields nothing and final_state merges to {}. That is
+        # how this test started failing with KeyError: 'final_trade_decision'
+        # when progress_callback joined the branch condition. None selects the
+        # graph.invoke() path this test is about; the streaming path is covered
+        # by test_full_pipeline_streams_with_progress_callback below.
+        mock_graph.progress_callback = None
         mock_graph.config = {"results_dir": str(tmp_path)}
         mock_graph.graph.invoke.return_value = fake_state
         mock_graph.propagator.create_initial_state.return_value = fake_state
@@ -869,3 +877,88 @@ class TestLegacyRemoval:
         assert len(entries) == 1
         assert entries[0]["ticker"] == "NVDA"
         assert entries[0]["pending"] is True
+
+    def test_full_pipeline_streams_with_progress_callback(self, tmp_path):
+        """The streaming branch must merge deltas into a usable final_state.
+
+        This is the path yStocker takes -- it always passes a progress_callback --
+        so the invoke() test above never exercised what production runs. A run
+        that streams and then cannot find final_trade_decision is the regression
+        this pins.
+        """
+        import functools
+
+        # Per-node deltas, the shape graph.stream() actually yields.
+        chunks = [
+            {"company_of_interest": "NVDA", "trade_date": "2026-01-10"},
+            {"market_report": "m", "sentiment_report": "s"},
+            {"news_report": "n", "fundamentals_report": "f"},
+            {"investment_debate_state": {
+                "bull_history": "", "bear_history": "", "history": "",
+                "current_response": "", "judge_decision": "",
+            }},
+            {"investment_plan": "", "trader_investment_plan": ""},
+            {"risk_debate_state": {
+                "aggressive_history": "", "conservative_history": "",
+                "neutral_history": "", "history": "", "judge_decision": "",
+                "current_aggressive_response": "",
+                "current_conservative_response": "",
+                "current_neutral_response": "", "count": 1, "latest_speaker": "",
+            }},
+            {"final_trade_decision": "Rating: Buy\nBuy NVDA."},
+        ]
+        seen = []
+
+        mock_graph = MagicMock()
+        mock_graph.memory_log = TradingMemoryLog(
+            {"memory_log_path": str(tmp_path / "mem.md")})
+        mock_graph.log_states_dict = {}
+        mock_graph.debug = False
+        mock_graph.progress_callback = seen.append
+        mock_graph.config = {"results_dir": str(tmp_path)}
+        mock_graph.graph.stream.return_value = iter(chunks)
+        mock_graph.propagator.create_initial_state.return_value = {}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.signal_processor.process_signal.return_value = "Buy"
+        mock_graph._run_graph = functools.partial(
+            TradingAgentsGraph._run_graph, mock_graph
+        )
+
+        TradingAgentsGraph.propagate(mock_graph, "NVDA", "2026-01-10")
+
+        # Every chunk reached the consumer, and the merge found the decision.
+        assert seen == chunks
+        entries = mock_graph.memory_log.load_entries()
+        assert len(entries) == 1
+        assert entries[0]["ticker"] == "NVDA"
+
+    def test_streaming_survives_a_failing_progress_callback(self, tmp_path):
+        """Reporting is less important than the analysis it describes."""
+        import functools
+
+        chunks = [
+            {"company_of_interest": "NVDA", "trade_date": "2026-01-10"},
+            {"final_trade_decision": "Rating: Buy\nBuy NVDA."},
+        ]
+
+        def boom(_chunk):
+            raise RuntimeError("consumer died")
+
+        mock_graph = MagicMock()
+        mock_graph.memory_log = TradingMemoryLog(
+            {"memory_log_path": str(tmp_path / "mem.md")})
+        mock_graph.log_states_dict = {}
+        mock_graph.debug = False
+        mock_graph.progress_callback = boom
+        mock_graph.config = {"results_dir": str(tmp_path)}
+        mock_graph.graph.stream.return_value = iter(chunks)
+        mock_graph.propagator.create_initial_state.return_value = {}
+        mock_graph.propagator.get_graph_args.return_value = {}
+        mock_graph.signal_processor.process_signal.return_value = "Buy"
+        mock_graph._run_graph = functools.partial(
+            TradingAgentsGraph._run_graph, mock_graph
+        )
+
+        TradingAgentsGraph.propagate(mock_graph, "NVDA", "2026-01-10")
+
+        assert len(mock_graph.memory_log.load_entries()) == 1

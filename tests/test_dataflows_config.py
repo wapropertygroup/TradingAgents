@@ -20,7 +20,13 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         cfg["tool_vendors"]["get_stock_data"] = "alpha_vantage"
 
         fresh = get_config()
-        self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "yfinance")
+        # Compared against the default rather than a literal: what this asserts
+        # is that the mutation above did not leak, not which vendor ships first.
+        # Hard-coding "yfinance" made it fail the day A-share support landed.
+        self.assertEqual(
+            fresh["data_vendors"]["core_stock_apis"],
+            default_config.DEFAULT_CONFIG["data_vendors"]["core_stock_apis"],
+        )
         self.assertNotIn("get_stock_data", fresh["tool_vendors"])
 
     def test_set_config_does_not_alias_caller_nested_dicts(self):
@@ -48,9 +54,15 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
 
         fresh = get_config()
         self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "alpha_vantage")
-        self.assertEqual(fresh["data_vendors"]["technical_indicators"], "yfinance")
-        self.assertEqual(fresh["data_vendors"]["fundamental_data"], "yfinance")
-        self.assertEqual(fresh["data_vendors"]["news_data"], "yfinance")
+        # Every *other* vendor keeps its default. Naming three of them and their
+        # expected values by hand is how this test came to assert a stale
+        # "yfinance"; deriving both from DEFAULT_CONFIG also covers the vendors
+        # added since (signal_data, macro_data, prediction_markets).
+        for key, expected in default_config.DEFAULT_CONFIG["data_vendors"].items():
+            if key == "core_stock_apis":
+                continue
+            with self.subTest(vendor=key):
+                self.assertEqual(fresh["data_vendors"][key], expected)
 
     def test_nested_dict_updates_merge_one_level_deep(self):
         set_config({"tool_vendors": {"get_stock_data": "alpha_vantage"}})
