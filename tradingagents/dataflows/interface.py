@@ -121,7 +121,14 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+#
+# ``signal_data`` belongs here for a sharper reason: it has a single vendor, so
+# one 东财 throttle exhausts its whole chain, where the core categories still have
+# yfinance behind a_stock. Its eight tools (龙虎榜/资金流/解禁/…) are A-share colour
+# for three of seven analysts, and 东财 calls are serialized behind a one-second
+# floor, so throttling is expected under a full run. Aborting there discarded the
+# other six analysts' completed work and their API spend.
+OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "signal_data"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -243,14 +250,23 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
+    last_rate_limit: VendorRateLimitError | None = None
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
             return impl_func(*args, **kwargs)
-        except VendorRateLimitError:
+        except VendorRateLimitError as e:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            # Recorded rather than dropped. A multi-vendor chain moves on and this
+            # never mattered, but a single-vendor category (signal_data) has
+            # nothing to move on to, so the tail below was left with no error at
+            # all and reported "No available vendor for 'get_fund_flow'" -- which
+            # names a registration bug that did not exist and hides the throttle
+            # that did.
+            if last_rate_limit is None:
+                last_rate_limit = e
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
@@ -294,6 +310,12 @@ def route_to_vendor(method: str, *args, **kwargs):
             f"not covered, or the vendor returned stale data. Do not estimate or "
             f"fabricate values — report that data is unavailable for this symbol."
         )
+
+    # A throttled vendor is a real failure with a nameable cause, so fold it into
+    # first_error here and let the block below apply the same optional-category
+    # degradation and reporting that every other failure gets.
+    if first_error is None and last_rate_limit is not None:
+        first_error = last_rate_limit
 
     # No vendor returned data and none reported clean "no data" — surface the
     # first real error (e.g. the primary vendor's network failure). Optional
