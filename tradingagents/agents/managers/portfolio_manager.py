@@ -13,7 +13,9 @@ from __future__ import annotations
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
+    get_market_context_block,
     get_portfolio_block,
+    get_relative_strength_block,
     get_risk_gate_block,
     get_language_instruction,
 )
@@ -65,6 +67,9 @@ def create_portfolio_manager(llm):
         portfolio_block = get_portfolio_block(
             state, "**The holder's current portfolio and stated limits:**")
         risk_gate_block = get_risk_gate_block(state)
+        market_block = get_market_context_block(state, "**Market regime notes:**")
+        relative_strength_block = get_relative_strength_block(
+            state, "**Relative strength vs. peers:**")
         earnings_report = state.get("earnings_report", "")
         earnings_block = (
             "\n**Earnings & estimate-revision evidence:**\n"
@@ -78,6 +83,36 @@ def create_portfolio_manager(llm):
             "on earnings evidence that is absent or low-confidence, say so in the "
             "rationale and let it reduce conviction rather than filling the hole.\n"
             if earnings_report
+            else ""
+        )
+        # Read straight off the state rather than trusting the risk debate to have
+        # carried it forward. By this point the tier has passed through a debate
+        # summary, a research plan and a trader proposal; anything that survives
+        # only by being quoted at each hop is gone -- the same reasoning
+        # earnings_block above is built on.
+        quality_report = state.get("quality_report", "")
+        quality_block = (
+            "\n**Business-quality evidence:**\n"
+            f"{quality_report}\n\n"
+            "Rules for using it. Every ratio and the quality tier were computed "
+            "from provider data — quote them as given, never recomputed or rounded. "
+            "The tier is final; do not upgrade, downgrade or re-label it. If the "
+            "decision rests on a quality read that is Insufficient Data or has "
+            "sparse signal coverage, say so in the rationale and let it reduce "
+            "conviction rather than filling the hole.\n"
+            if quality_report
+            else ""
+        )
+        valuation_report = state.get("valuation_report", "")
+        valuation_block = (
+            "\n**Valuation evidence:**\n"
+            f"{valuation_report}\n\n"
+            "Rules for using it. Every multiple and the valuation tier were "
+            "computed from provider data — quote them as given, never recomputed "
+            "or rounded. A missing trailing P/E is commonly a negative-earnings "
+            "company; it is absent, not evidence the stock is cheap or expensive. "
+            "The tier is final; do not upgrade, downgrade or re-label it.\n"
+            if valuation_report
             else ""
         )
 
@@ -99,8 +134,12 @@ def create_portfolio_manager(llm):
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
 {earnings_block}
+{quality_block}
+{valuation_block}
 {portfolio_block}
 {risk_gate_block}
+{market_block}
+{relative_strength_block}
 **Risk Analysts Debate History:**
 {history}
 

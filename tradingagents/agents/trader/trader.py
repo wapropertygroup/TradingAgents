@@ -10,7 +10,9 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_market_context_block,
     get_portfolio_block,
+    get_relative_strength_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -43,6 +45,9 @@ def create_trader(llm):
         # kind of dated, countable detail a summary drops first.
         portfolio_block = get_portfolio_block(
             state, "The holder's current portfolio and stated limits:")
+        market_block = get_market_context_block(state, "Market regime notes:")
+        relative_strength_block = get_relative_strength_block(
+            state, "Relative strength vs. peers:")
         earnings_report = state.get("earnings_report", "")
         earnings_block = (
             f"\n\nEarnings & estimate-revision evidence:\n{earnings_report}\n\n"
@@ -52,6 +57,30 @@ def create_trader(llm):
             "does not exist — treat them as unknown rather than neutral, and do not "
             "size a position as though the signal were confirmed."
             if earnings_report
+            else ""
+        )
+        # Same reasoning as earnings_block: the plan is a summary, and a quality
+        # or valuation tier is exactly the kind of countable detail a summary
+        # drops first when the debate spent its words elsewhere.
+        quality_report = state.get("quality_report", "")
+        quality_block = (
+            f"\n\nBusiness-quality evidence:\n{quality_report}\n\n"
+            "Every ratio and the quality tier above were computed from provider "
+            "data; report them as given and do not recompute or round them. The "
+            "tier is final -- do not upgrade, downgrade or re-label it. Insufficient "
+            "Data means signal coverage does not exist, not that quality is neutral."
+            if quality_report
+            else ""
+        )
+        valuation_report = state.get("valuation_report", "")
+        valuation_block = (
+            f"\n\nValuation evidence:\n{valuation_report}\n\n"
+            "Every multiple and the valuation tier above were computed from "
+            "provider data; report them as given and do not recompute or round "
+            "them. A missing trailing P/E is commonly a negative-earnings company "
+            "-- absent, not evidence the stock is cheap or expensive. The tier is "
+            "final -- do not upgrade, downgrade or re-label it."
+            if valuation_report
             else ""
         )
 
@@ -76,7 +105,11 @@ def create_trader(llm):
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
                     f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n"
                     f"{earnings_block}\n"
+                    f"{quality_block}\n"
+                    f"{valuation_block}\n"
                     f"{portfolio_block}\n"
+                    f"{market_block}\n"
+                    f"{relative_strength_block}\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },

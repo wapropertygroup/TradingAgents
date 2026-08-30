@@ -17,6 +17,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_cashflow,
     get_earnings_commentary,
     get_earnings_evidence,
+    get_quality_evidence,
+    get_valuation_evidence,
     get_fundamentals,
     get_global_news,
     get_income_statement,
@@ -84,6 +86,8 @@ class TradingAgentsGraph:
         progress_callback=None,
         portfolio_context: str = "",
         portfolio_data: dict[str, Any] | None = None,
+        market_context: str = "",
+        relative_strength_context: str = "",
     ):
         """Initialize the trading agents graph and components.
 
@@ -178,6 +182,14 @@ class TradingAgentsGraph:
         # the caller's side and must describe the same portfolio.
         self.portfolio_data = dict(portfolio_data or {})
 
+        # Same reasoning as portfolio_context immediately above: macro/regime
+        # notes and peer standing both change at least daily and must not be
+        # folded into _run_signature, or a stale checkpoint key would either
+        # force every resume to a cold start or (worse) let a resumed run
+        # silently keep reading a value hours out of date.
+        self.market_context = market_context or ""
+        self.relative_strength_context = relative_strength_context or ""
+
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
@@ -268,6 +280,17 @@ class TradingAgentsGraph:
                     # its own plumbing as missing evidence.
                     get_earnings_evidence,
                     get_earnings_commentary,
+                ]
+            ),
+            "quality": ToolNode(
+                [
+                    # Called deterministically, same reasoning as "earnings" above.
+                    get_quality_evidence,
+                ]
+            ),
+            "valuation": ToolNode(
+                [
+                    get_valuation_evidence,
                 ]
             ),
             "policy": ToolNode([get_news, get_global_news]),
@@ -497,6 +520,8 @@ class TradingAgentsGraph:
             instrument_context=instrument_context,
             portfolio_context=self.portfolio_context,
             portfolio_data=self.portfolio_data,
+            market_context=self.market_context,
+            relative_strength_context=self.relative_strength_context,
         )
         args = self.propagator.get_graph_args()
 
@@ -587,6 +612,8 @@ class TradingAgentsGraph:
             "news_report": final_state.get("news_report", ""),
             "fundamentals_report": final_state.get("fundamentals_report", ""),
             "earnings_report": final_state.get("earnings_report", ""),
+            "quality_report": final_state.get("quality_report", ""),
+            "valuation_report": final_state.get("valuation_report", ""),
             "policy_report": final_state.get("policy_report", ""),
             "hot_money_report": final_state.get("hot_money_report", ""),
             "lockup_report": final_state.get("lockup_report", ""),

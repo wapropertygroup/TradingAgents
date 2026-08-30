@@ -625,3 +625,136 @@ def render_earnings_narrative(narrative: EarningsNarrative) -> str:
         "",
         f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
     ])
+
+
+class QualityNarrative(BaseModel):
+    """Bounded qualitative synthesis layered over code-owned quality evidence.
+
+    This schema intentionally contains no ROE, margin, leverage figure, or
+    tier label. Those are computed and rendered from the evidence tool result,
+    so a language model cannot silently rewrite them. ``moat_assessment`` is
+    the one field here explicitly permitted to draw on general business
+    knowledge rather than evidence alone -- unlike an earnings consensus
+    number, "does this company have a durable moat" is not something any
+    vendor publishes as a figure, and refusing the model any judgement here
+    would make the field useless. The financial *facts* it reasons from must
+    still come from the evidence above it.
+    """
+
+    moat_assessment: str = Field(
+        description=(
+            "Assessment of competitive positioning / moat, informed by the "
+            "margin and return-on-equity evidence above plus general "
+            "knowledge of the business and its industry. Say so explicitly "
+            "when reasoning from general knowledge rather than the supplied "
+            "figures."
+        ),
+    )
+    red_flags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Up to five concerns that could undermine the quality read -- "
+            "concentration risk, cyclicality, competitive threats, "
+            "accounting quality, key-person risk -- grounded in the evidence "
+            "or in reasoned, disclosed business judgement."
+        ),
+    )
+    data_gaps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Missing, stale, partial-coverage, or low-confidence fields. Preserve "
+            "the provider's unavailable disclosures; never fill a gap by inference."
+        ),
+    )
+    confidence: Literal["low", "medium", "high"] = Field(
+        description="Confidence in the qualitative synthesis only.",
+    )
+
+    @field_validator("red_flags", mode="after")
+    @classmethod
+    def _limit_bullets(cls, value: list[str]) -> list[str]:
+        return value[:5]
+
+
+def render_quality_narrative(narrative: QualityNarrative) -> str:
+    """Render only qualitative fields; numeric evidence is rendered elsewhere."""
+
+    def bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
+
+    return "\n".join([
+        "## Moat & Competitive Positioning",
+        narrative.moat_assessment or "Unavailable",
+        "",
+        "## Red Flags",
+        bullets(narrative.red_flags),
+        "",
+        "## Data Gaps",
+        bullets(narrative.data_gaps),
+        "",
+        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+    ])
+
+
+class ValuationNarrative(BaseModel):
+    """Bounded qualitative synthesis layered over code-owned valuation evidence.
+
+    Contains no P/E, PEG, P/B figure, or tier label -- those are computed and
+    rendered from the evidence tool result. ``thesis`` may draw on general
+    knowledge of the business's growth trajectory to explain *why* the tier
+    looks the way it does (the same latitude ``QualityNarrative.moat_assessment``
+    has), but must not re-derive or restate the tier itself in different words.
+    """
+
+    thesis: str = Field(
+        description=(
+            "Synthesis of what the computed valuation tier means in context "
+            "-- e.g. a 'Fair' tier despite an expensive headline P/E because "
+            "PEG and the forward/trailing spread say growth is expected to "
+            "close the gap. Quote the tier as given; do not re-derive it."
+        ),
+    )
+    catalysts_for_rerating: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Up to five things that could cause the market to re-rate the "
+            "multiple, up or down -- grounded in the evidence or in reasoned, "
+            "disclosed business judgement."
+        ),
+    )
+    data_gaps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Missing, stale, partial-coverage, or low-confidence fields. Preserve "
+            "the provider's unavailable disclosures; never fill a gap by inference."
+        ),
+    )
+    confidence: Literal["low", "medium", "high"] = Field(
+        description="Confidence in the qualitative synthesis only.",
+    )
+
+    @field_validator("catalysts_for_rerating", mode="after")
+    @classmethod
+    def _limit_bullets(cls, value: list[str]) -> list[str]:
+        return value[:5]
+
+
+def render_valuation_narrative(narrative: ValuationNarrative) -> str:
+    """Render only qualitative fields; numeric evidence is rendered elsewhere."""
+
+    def bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
+
+    return "\n".join([
+        "## Valuation Thesis",
+        narrative.thesis or "Unavailable",
+        "",
+        "## Catalysts for Re-rating",
+        bullets(narrative.catalysts_for_rerating),
+        "",
+        "## Data Gaps",
+        bullets(narrative.data_gaps),
+        "",
+        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+    ])
+

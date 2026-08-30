@@ -1,10 +1,11 @@
 """Every downstream consumer must receive every analyst report.
 
-The filename says "seven" for history; there are eight specialist reports now.
-The list is derived from ``ANALYST_NODE_SPECS`` rather than written out, so
-adding a ninth analyst without wiring it downstream fails here instead of
-producing a report that is written to disk and then quietly ignored by every
-agent that makes a decision.
+The filename says "seven" for history; there are ten specialist reports now
+(eight, then Quality and Valuation split off Fundamentals). The list is
+derived from ``ANALYST_NODE_SPECS`` rather than written out, so adding an
+eleventh analyst without wiring it downstream fails here instead of producing
+a report that is written to disk and then quietly ignored by every agent
+that makes a decision.
 
 The Research Manager, Trader and Portfolio Manager are covered too, and for a
 different reason from the debaters. They sit behind a debate summary, a research
@@ -85,8 +86,10 @@ def _state():
 
 class EightReportDownstreamTests(unittest.TestCase):
     def test_there_are_eight_specialist_reports(self):
-        self.assertEqual(len(REPORT_KEYS), 8, REPORT_KEYS)
+        self.assertEqual(len(REPORT_KEYS), 10, REPORT_KEYS)
         self.assertIn("earnings_report", REPORT_KEYS)
+        self.assertIn("quality_report", REPORT_KEYS)
+        self.assertIn("valuation_report", REPORT_KEYS)
 
     def test_debate_consumers_receive_every_report(self):
         for factory in DEBATE_CONSUMERS:

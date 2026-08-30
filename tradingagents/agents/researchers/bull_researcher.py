@@ -14,7 +14,9 @@ def create_bull_researcher(llm):
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        quality_report = state["quality_report"]
+        valuation_report = state["valuation_report"]
+        fundamentals_report = state.get("fundamentals_report", "")
         policy_report = state.get("policy_report", "")
         hot_money_report = state.get("hot_money_report", "")
         lockup_report = state.get("lockup_report", "")
@@ -42,6 +44,8 @@ Resources available:
 Market research report: {market_research_report}
 Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
+Business-quality report (moat, margins, leverage, cash generation): {quality_report}
+Valuation report (multiples, PEG, valuation tier): {valuation_report}
 {fundamentals_label}: {fundamentals_report}
 Policy analysis report: {policy_report}
 Hot money / capital-flow report: {hot_money_report}

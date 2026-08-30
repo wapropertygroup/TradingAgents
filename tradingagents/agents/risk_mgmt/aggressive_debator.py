@@ -1,7 +1,9 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_market_context_block,
     get_portfolio_block,
+    get_relative_strength_block,
     get_risk_gate_block,
 )
 
@@ -19,6 +21,8 @@ def create_aggressive_debator(llm):
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
+        quality_report = state["quality_report"]
+        valuation_report = state["valuation_report"]
         policy_report = state.get("policy_report", "")
         hot_money_report = state.get("hot_money_report", "")
         lockup_report = state.get("lockup_report", "")
@@ -30,6 +34,9 @@ def create_aggressive_debator(llm):
         portfolio_block = get_portfolio_block(
             state, "The holder's current portfolio and stated limits:")
         risk_gate_block = get_risk_gate_block(state)
+        market_block = get_market_context_block(state, "Market regime notes:")
+        relative_strength_block = get_relative_strength_block(
+            state, "Relative strength vs. peers:")
 
         prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
 
@@ -42,12 +49,16 @@ Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
+Business-Quality Report: {quality_report}
+Valuation Report: {valuation_report}
 Policy Analysis Report: {policy_report}
 Hot Money / Capital Flow Report: {hot_money_report}
 Lock-up / Insider Reduction Report: {lockup_report}
 Earnings & Estimate Revision Report: {earnings_report}
 {portfolio_block}
 {risk_gate_block}
+{market_block}
+{relative_strength_block}
 Here is the current conversation history: {history} Here are the last arguments from the conservative analyst: {current_conservative_response} Here are the last arguments from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
 Engage actively by addressing any specific concerns raised, refuting the weaknesses in their logic, and asserting the benefits of risk-taking to outpace market norms. Maintain a focus on debating and persuading, not just presenting data. Challenge each counterpoint to underscore why a high-risk approach is optimal. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()

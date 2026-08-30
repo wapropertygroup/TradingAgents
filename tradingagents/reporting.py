@@ -39,6 +39,14 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "earnings.md").write_text(final_state["earnings_report"], encoding="utf-8")
         analyst_parts.append(("Earnings Analyst", final_state["earnings_report"]))
+    if final_state.get("quality_report"):
+        analysts_dir.mkdir(exist_ok=True)
+        (analysts_dir / "quality.md").write_text(final_state["quality_report"], encoding="utf-8")
+        analyst_parts.append(("Quality Analyst", final_state["quality_report"]))
+    if final_state.get("valuation_report"):
+        analysts_dir.mkdir(exist_ok=True)
+        (analysts_dir / "valuation.md").write_text(final_state["valuation_report"], encoding="utf-8")
+        analyst_parts.append(("Valuation Analyst", final_state["valuation_report"]))
     if final_state.get("policy_report"):
         analysts_dir.mkdir(exist_ok=True)
         (analysts_dir / "policy.md").write_text(final_state["policy_report"], encoding="utf-8")

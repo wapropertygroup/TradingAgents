@@ -20,9 +20,11 @@ from tradingagents.agents import (
     create_news_analyst,
     create_portfolio_manager,
     create_policy_analyst,
+    create_quality_analyst,
     create_research_manager,
     create_sentiment_analyst,
     create_trader,
+    create_valuation_analyst,
 )
 from tradingagents.agents.risk_mgmt.risk_gate import create_risk_gate
 from tradingagents.agents.utils.agent_states import AgentState
@@ -73,8 +75,15 @@ class GraphSetup:
                 - "market": Market analyst
                 - "social": Social media analyst
                 - "news": News analyst
-                - "fundamentals": Fundamentals analyst
+                - "fundamentals": Fundamentals analyst (generic; superseded by
+                  "quality" + "valuation" in ystocker's default roster, kept
+                  here and selectable for callers that want the broad-brush
+                  single report instead of the split)
                 - "earnings": Earnings & estimate revision analyst (opt-in)
+                - "quality": Business-quality analyst -- ROE, margins,
+                  leverage, cash generation, multi-period consistency
+                - "valuation": Valuation analyst -- P/E, PEG, price-to-book,
+                  dividend yield
         """
         plan = build_analyst_execution_plan(selected_analysts)
 
@@ -84,6 +93,8 @@ class GraphSetup:
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
             "earnings": lambda: create_earnings_analyst(self.quick_thinking_llm),
+            "quality": lambda: create_quality_analyst(self.quick_thinking_llm),
+            "valuation": lambda: create_valuation_analyst(self.quick_thinking_llm),
             "policy": lambda: create_policy_analyst(self.quick_thinking_llm),
             "hot_money": lambda: create_hot_money_tracker(self.quick_thinking_llm),
             "lockup": lambda: create_lockup_watcher(self.quick_thinking_llm),

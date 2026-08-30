@@ -36,10 +36,21 @@ as neutral drags every thinly-covered name toward the middle band and makes
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal
+
+from tradingagents.dataflows.evidence_values import (
+    EPSILON,
+    Value,
+    _fmt,
+    _fmt_large,
+    bounded,
+    safe_date,
+    safe_float,
+    safe_int,
+    safe_ratio,
+)
 
 # ---------------------------------------------------------------------------
 # Locked constants
@@ -48,10 +59,13 @@ from typing import Any, Literal
 # table-driven tests rather than tuned in place, because moving any of them
 # silently changes the product meaning of a published "Strong Positive".
 # tests/test_earnings_models.py asserts every boundary below.
+#
+# EPSILON, safe_float/safe_int/safe_date/safe_ratio, bounded, and
+# Value/_fmt/_fmt_large now live in evidence_values.py — nothing earnings-
+# specific about them, and Quality/Valuation reuse them rather than
+# duplicating ~150 lines. Re-exported here (imported above) so nothing that
+# already does ``from earnings_models import safe_float`` (etc.) breaks.
 # ---------------------------------------------------------------------------
-
-#: Below this, a denominator is treated as indistinguishable from zero.
-EPSILON = 1e-9
 
 #: Symmetric change at which a horizon's signal reaches full strength (±1).
 #: Scaled by horizon: a 2% move in seven days is as informative as an 8% move
@@ -123,69 +137,6 @@ PRIMARY_PERIOD = PERIOD_CURRENT_YEAR
 
 
 # ---------------------------------------------------------------------------
-# Safe coercion
-# ---------------------------------------------------------------------------
-
-
-def safe_float(raw: Any) -> float | None:
-    """Coerce to ``float``, mapping every unusable input to ``None``.
-
-    Rejects NaN and ±inf as well as the obvious non-numerics. pandas hands out
-    ``nan`` for a blank cell and ``numpy.float64`` for a filled one, and a NaN
-    that survives into the scoring silently poisons the weighted mean: NaN
-    compares false against every band boundary, so the chain of ``>=`` tests
-    falls through to the most negative band.
-    """
-    if raw is None or isinstance(raw, bool):
-        return None
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(value) or math.isinf(value):
-        return None
-    return value
-
-
-def safe_int(raw: Any) -> int | None:
-    """Coerce to ``int`` via :func:`safe_float`, so NaN counts become ``None``."""
-    value = safe_float(raw)
-    if value is None:
-        return None
-    return int(round(value))
-
-
-def safe_date(raw: Any) -> str | None:
-    """Normalize a date-ish value to ``YYYY-MM-DD``, or ``None``.
-
-    Accepts ``date``/``datetime`` (yfinance's ``calendar`` returns
-    ``datetime.date`` objects), an ISO string, or a pandas ``Timestamp``, which
-    subclasses ``datetime``. A timestamp is reduced to its date component in
-    whatever zone it arrives in; callers that care about zone alignment
-    normalize before calling (see ``compare_as_of``).
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, datetime):
-        return raw.date().isoformat()
-    if isinstance(raw, date):
-        return raw.isoformat()
-    text = str(raw).strip()
-    if not text or text.lower() in {"none", "nan", "nat", "-", "null"}:
-        return None
-    try:
-        return datetime.fromisoformat(text[:19].replace("Z", "")).date().isoformat()
-    except ValueError:
-        pass
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d", "%b %d, %Y"):
-        try:
-            return datetime.strptime(text[: len(fmt) + 6], fmt).date().isoformat()
-        except ValueError:
-            continue
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Change arithmetic
 # ---------------------------------------------------------------------------
 
@@ -217,113 +168,6 @@ def symmetric_change(today: float | None, old: float | None) -> float | None:
     if denominator < EPSILON:
         return 0.0 if today == old else None
     return 2.0 * (today - old) / denominator
-
-
-def bounded(value: float | None, scale: float) -> float | None:
-    """Map a symmetric change onto ``[-1, 1]``, saturating at ``±scale``."""
-    if value is None:
-        return None
-    if scale <= 0:
-        raise ValueError(f"scale must be positive, got {scale!r}")
-    return max(-1.0, min(1.0, value / scale))
-
-
-def safe_ratio(numerator: float | None, denominator: float | None) -> float | None:
-    """``numerator / denominator``, or ``None`` when the denominator vanishes."""
-    if numerator is None or denominator is None:
-        return None
-    if abs(denominator) < EPSILON:
-        return None
-    result = numerator / denominator
-    if math.isnan(result) or math.isinf(result):
-        return None
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Provenance-carrying scalar
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Value:
-    """One scalar plus everything needed to judge whether to trust it.
-
-    ``available`` is derived from ``value is not None`` rather than stored, so
-    the two can never disagree. ``unavailable_reason`` is required reading in
-    the report when the value is absent: the difference between "this provider
-    does not publish 90-day breadth" and "this symbol has no analyst coverage"
-    is the difference between a tooling gap and a fact about the company.
-    """
-
-    value: float | None = None
-    unit: str = "number"
-    currency: str | None = None
-    source: str | None = None
-    as_of: str | None = None
-    unavailable_reason: str | None = None
-
-    @property
-    def available(self) -> bool:
-        return self.value is not None
-
-    @classmethod
-    def missing(cls, reason: str, *, unit: str = "number", source: str | None = None) -> Value:
-        return cls(value=None, unit=unit, source=source, unavailable_reason=reason)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "value": self.value,
-            "unit": self.unit,
-            "currency": self.currency,
-            "source": self.source,
-            "as_of": self.as_of,
-            "available": self.available,
-            "unavailable_reason": self.unavailable_reason,
-        }
-
-    @classmethod
-    def from_dict(cls, raw: Any) -> Value:
-        if not isinstance(raw, dict):
-            return cls.missing("malformed serialized value")
-        return cls(
-            value=safe_float(raw.get("value")),
-            unit=str(raw.get("unit") or "number"),
-            currency=raw.get("currency"),
-            source=raw.get("source"),
-            as_of=raw.get("as_of"),
-            unavailable_reason=raw.get("unavailable_reason"),
-        )
-
-
-def _fmt(value: Value, *, digits: int = 2) -> str:
-    """Render a :class:`Value` for the report, currency-suffixed when known."""
-    if not value.available:
-        return "unavailable"
-    number = value.value
-    assert number is not None
-    if value.unit == "pct_dec":
-        return f"{number * 100:+.2f}%"
-    if value.unit == "count":
-        return f"{int(round(number))}"
-    if value.unit == "ratio":
-        return f"{number:+.3f}"
-    if value.unit == "currency_large":
-        return _fmt_large(number, value.currency)
-    text = f"{number:,.{digits}f}"
-    return f"{text} {value.currency}" if value.currency else text
-
-
-def _fmt_large(number: float, currency: str | None) -> str:
-    """Compact a revenue figure; Yahoo reports these in absolute units."""
-    magnitude = abs(number)
-    for divisor, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
-        if magnitude >= divisor:
-            text = f"{number / divisor:,.2f}{suffix}"
-            break
-    else:
-        text = f"{number:,.0f}"
-    return f"{text} {currency}" if currency else text
 
 
 # ---------------------------------------------------------------------------

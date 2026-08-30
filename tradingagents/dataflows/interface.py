@@ -52,6 +52,10 @@ from .y_finance import (
     get_stock_stats_indicators_window,
     get_YFin_data_online,
 )
+from .fundamentals_evidence import (
+    get_quality_evidence as get_yfinance_quality_evidence,
+    get_valuation_evidence as get_yfinance_valuation_evidence,
+)
 from .yfinance_earnings import get_earnings_evidence as get_yfinance_earnings_evidence
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 
@@ -121,6 +125,25 @@ TOOLS_CATEGORIES = {
         "description": "Earnings-call transcript / management commentary",
         "tools": [
             "get_earnings_commentary",
+        ],
+    },
+    "quality_data": {
+        "description": (
+            "Business-quality fundamentals: ROE, margins, leverage, cash "
+            "generation, multi-period margin consistency, and a computed "
+            "quality tier"
+        ),
+        "tools": [
+            "get_quality_evidence",
+        ],
+    },
+    "valuation_data": {
+        "description": (
+            "Valuation multiples: trailing/forward P/E, PEG, price-to-book, "
+            "dividend yield, and a computed valuation tier"
+        ),
+        "tools": [
+            "get_valuation_evidence",
         ],
     },
 }
@@ -246,6 +269,18 @@ VENDOR_METHODS = {
         "yfinance": get_yfinance_earnings_evidence,
         "alpha_vantage": get_alpha_vantage_earnings_evidence,
         "a_stock": get_astock_earnings_evidence,
+    },
+    # quality_evidence / valuation_evidence. yfinance-only for now: unlike
+    # earnings, which needed alpha_vantage/a_stock backups because revision
+    # history is a thin-coverage category, ROE/margins/P-E/PEG/P-B are core
+    # yfinance.info fields with no point-in-time complexity, so a second
+    # vendor has not been needed yet. Adding one later is additive -- the
+    # vendor-chain shape already supports it.
+    "get_quality_evidence": {
+        "yfinance": get_yfinance_quality_evidence,
+    },
+    "get_valuation_evidence": {
+        "yfinance": get_yfinance_valuation_evidence,
     },
     # earnings_commentary. Alpha Vantage only: it is the sole source here for an
     # earnings-call transcript. Unconfigured, it raises VendorNotConfiguredError

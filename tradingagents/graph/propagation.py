@@ -24,6 +24,8 @@ class Propagator:
         instrument_context: str = "",
         portfolio_context: str = "",
         portfolio_data: dict[str, Any] | None = None,
+        market_context: str = "",
+        relative_strength_context: str = "",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -41,6 +43,13 @@ class Propagator:
         flat. Only the decision-making agents receive it; the analysts do not, so
         that a fundamentals or news read cannot be shaded by what the reader
         happens to hold.
+
+        ``market_context`` and ``relative_strength_context`` are caller-supplied
+        macro/regime and peer-comparison notes respectively, on the same
+        decision-agents-only distribution as ``portfolio_context`` and for the
+        same reason: they describe the moment and the peer group, not this
+        specific company's fundamentals or news, so an analyst's read of the
+        company itself must not be shaded by them either.
         """
         return {
             "messages": [("human", company_name)],
@@ -51,6 +60,8 @@ class Propagator:
             "past_context": past_context,
             "portfolio_context": portfolio_context,
             "portfolio_data": dict(portfolio_data or {}),
+            "market_context": market_context,
+            "relative_strength_context": relative_strength_context,
             "risk_gate": {},
             "pm_levels": {},
             "gate_compliance": {},
@@ -82,6 +93,8 @@ class Propagator:
             "market_report": "",
             "fundamentals_report": "",
             "earnings_report": "",
+            "quality_report": "",
+            "valuation_report": "",
             "sentiment_report": "",
             "news_report": "",
             "policy_report": "",

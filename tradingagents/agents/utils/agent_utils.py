@@ -18,6 +18,10 @@ from tradingagents.agents.utils.fundamental_data_tools import (
     get_fundamentals,
     get_income_statement,
 )
+from tradingagents.agents.utils.fundamentals_evidence_tools import (
+    get_quality_evidence,
+    get_valuation_evidence,
+)
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot
 from tradingagents.agents.utils.news_data_tools import (
@@ -49,6 +53,8 @@ __all__ = [
     "get_income_statement",
     "get_earnings_evidence",
     "get_earnings_commentary",
+    "get_quality_evidence",
+    "get_valuation_evidence",
     "get_news",
     "get_global_news",
     "get_insider_transactions",
@@ -262,6 +268,63 @@ def get_portfolio_block(state: Mapping[str, Any], heading: str) -> str:
     if not context:
         return ""
     return f"\n{heading}\n{context}\n\n{_PORTFOLIO_RULES}\n"
+
+
+def get_market_context_from_state(state: Mapping[str, Any]) -> str:
+    """The caller's macro/regime notes, or "" when none was supplied.
+
+    Returned verbatim, same rationale as ``get_portfolio_context_from_state``:
+    the block is assembled by the caller (ystocker) from its own cached market
+    data before the run starts, so re-deriving or summarising any of it here
+    would put arithmetic no agent can independently check back in reach of a
+    language model.
+    """
+    context = state.get("market_context")
+    if isinstance(context, str) and context.strip():
+        return context
+    return ""
+
+
+def get_relative_strength_from_state(state: Mapping[str, Any]) -> str:
+    """The caller's peer-comparison notes, or "" when none was supplied.
+
+    Empty is the common case: a ticker outside every configured peer group, or
+    one Yahoo covers with no analyst estimates, has nothing to compare.
+    """
+    context = state.get("relative_strength_context")
+    if isinstance(context, str) and context.strip():
+        return context
+    return ""
+
+
+#: Framing for both blocks below, written once so five prompts cannot drift —
+#: same reasoning as ``_PORTFOLIO_RULES`` above. Deliberately shorter: these
+#: are descriptive market data with no compliance obligation attached, unlike
+#: the portfolio block's three-valued BREACH/INDETERMINATE/PASS verdicts, so
+#: the risk here is a model over-weighting one macro paragraph into a
+#: company-specific conclusion, not misreading an arithmetic result.
+_MARKET_CONTEXT_RULES = (
+    "This is context, not a directive: it describes the broad market or the "
+    "peer group, not this specific company, and every figure in it was "
+    "computed before this run began — quote figures as given rather than "
+    "re-deriving them."
+)
+
+
+def get_market_context_block(state: Mapping[str, Any], heading: str) -> str:
+    """The macro/regime notes wrapped in a heading and rules, or "" when absent."""
+    context = get_market_context_from_state(state)
+    if not context:
+        return ""
+    return f"\n{heading}\n{context}\n\n{_MARKET_CONTEXT_RULES}\n"
+
+
+def get_relative_strength_block(state: Mapping[str, Any], heading: str) -> str:
+    """The peer-comparison notes wrapped in a heading and rules, or "" when absent."""
+    context = get_relative_strength_from_state(state)
+    if not context:
+        return ""
+    return f"\n{heading}\n{context}\n\n{_MARKET_CONTEXT_RULES}\n"
 
 
 def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:

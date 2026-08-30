@@ -59,6 +59,39 @@ from prior knowledge of the company.
             if earnings_report
             else ""
         )
+        # Same reasoning as the earnings block above: read straight off the
+        # state rather than trusting the bull/bear debate to have carried it,
+        # since a report neither side happened to quote otherwise vanishes
+        # before the decision that most needs it.
+        quality_report = state.get("quality_report", "")
+        quality_block = (
+            f"""**Business-quality evidence:**
+{quality_report}
+
+Reconcile it explicitly: does the quality tier support or cut against the bull/
+bear case you are weighing? The tier and every ratio behind it are computed, not
+argued — report them as given, and do not let a debate-side characterization of
+"strong margins" or "weak balance sheet" override the published numbers. A tier
+of Insufficient Data means signal coverage does not exist, not that quality is
+neutral.
+"""
+            if quality_report
+            else ""
+        )
+        valuation_report = state.get("valuation_report", "")
+        valuation_block = (
+            f"""**Valuation evidence:**
+{valuation_report}
+
+Reconcile it explicitly: a bull case argued purely on business quality while the
+valuation tier is Expensive or Extreme Premium needs to say so and address it,
+not omit it. The tier and every multiple behind it are computed, not argued. A
+missing trailing P/E is commonly a negative-earnings company — absent, not
+evidence of cheapness or expense.
+"""
+            if valuation_report
+            else ""
+        )
 
         investment_debate_state = state["investment_debate_state"]
 
@@ -90,6 +123,8 @@ unlock/reduction supply shocks; do not let an omitted debate reference erase a
 specialist report.
 
 {earnings_block}
+{quality_block}
+{valuation_block}
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction()
 
         investment_plan = invoke_structured_or_freetext(
