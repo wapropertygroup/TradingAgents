@@ -52,6 +52,8 @@ class Propagator:
             "portfolio_context": portfolio_context,
             "portfolio_data": dict(portfolio_data or {}),
             "risk_gate": {},
+            "pm_levels": {},
+            "gate_compliance": {},
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

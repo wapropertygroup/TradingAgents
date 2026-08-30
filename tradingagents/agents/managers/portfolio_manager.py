@@ -20,9 +20,10 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured,
 )
 from tradingagents.dataflows.a_stock import is_a_share
+from tradingagents import risk_engine
 
 
 _A_SHARE_FINAL_CONSTRAINTS = """
@@ -111,13 +112,28 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 
-        final_trade_decision = invoke_structured_or_freetext(
+        final_trade_decision, decision = invoke_structured(
             structured_llm,
             llm,
             prompt,
             render_pm_decision,
             "Portfolio Manager",
         )
+
+        # Compliance as a computed fact rather than something a reader infers from
+        # the paragraph above. An A/B on this pipeline found the model does honour a
+        # binding ruling, but that is only a useful claim if it is checked on every
+        # run instead of assumed from a sample -- and a decision ledger cannot
+        # record obedience it has to read out of prose.
+        pm_levels = decision.levels() if decision is not None else {}
+        compliance = risk_engine.check_compliance(pm_levels, state.get("risk_gate"))
+
+        # Appended, never corrected. Rewriting the size in the structured field
+        # while the narrative still argued for the original would produce a report
+        # that contradicts itself, and a reader believes the narrative.
+        notice = risk_engine.render_compliance(compliance)
+        if notice:
+            final_trade_decision = final_trade_decision + "\n" + notice
 
         new_risk_debate_state = {
             "judge_decision": final_trade_decision,
@@ -135,6 +151,10 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
         return {
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
+            # The two fields a decision ledger needs. Both are {} on the free-text
+            # path, where the numbers genuinely do not exist -- unstated, not zero.
+            "pm_levels": pm_levels,
+            "gate_compliance": compliance,
         }
 
     return portfolio_manager_node

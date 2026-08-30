@@ -380,3 +380,148 @@ def render(decision: Mapping[str, Any]) -> str:
                  f"between rungs were not tested and are not implicitly approved.")
     lines.append("<end_of_risk_gate>")
     return "\n".join(lines)
+
+# ---------------------------------------------------------------------------
+# Compliance: did the Portfolio Manager honour the ruling?
+# ---------------------------------------------------------------------------
+
+#: Compliance outcomes. ``UNVERIFIABLE`` is not a pass: it means the decision did
+#: not state a size, or there was no ruling to compare it against.
+COMPLY_OK = "compliant"
+COMPLY_VIOLATED = "violated"
+COMPLY_UNVERIFIABLE = "unverifiable"
+
+COMPLIANCE_TEXT: dict[str, str] = {
+    "size_exceeds_approved": (
+        "the final position size is larger than the size the risk gate approved"),
+    "size_on_a_blocked_trade": (
+        "the risk gate blocked this trade, and the final decision still states a "
+        "position size above zero"),
+    "no_size_stated": (
+        "the final decision states no position size, so it cannot be checked "
+        "against the ruling"),
+    "no_ruling": (
+        "no risk gate ruling was available, so the size was not checked against "
+        "any limit"),
+    "decision_levels_inconsistent": (
+        "the final decision's own numbers contradict each other"),
+}
+
+
+def check_compliance(pm_levels: Optional[Mapping[str, Any]],
+                     gate: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    """Whether the Portfolio Manager's stated size honours the gate's ruling.
+
+    The point of this function is that compliance becomes a **computed fact**
+    rather than something a reader infers from prose. An A/B on this pipeline found
+    the model does obey a binding ruling (12/12 across four arms), but "the model
+    complied" is only a useful claim if it is checked on every run rather than
+    assumed from a sample — and a decision ledger cannot record obedience it has to
+    read out of a paragraph.
+
+    Deliberately **reports** a violation rather than correcting it. Overwriting
+    ``position_size_pct`` would leave the structured field saying 5% while the
+    executive summary still argued for 20%, and a reader believes the prose. A
+    correct rewrite would need the narrative regenerated, which is another model
+    call; a loud, honest record is the cheaper and more truthful option.
+
+    ``UNVERIFIABLE`` covers both "the decision stated no size" and "there was no
+    ruling". Neither is a pass, and conflating either with compliance is how a
+    system starts reporting a control that was never exercised.
+    """
+    levels = dict(pm_levels or {})
+    ruling = dict(gate or {})
+    verdict = str(ruling.get("verdict") or "")
+    size = levels.get("position_size_pct")
+    reasons: list[str] = []
+
+    if levels.get("flags"):
+        reasons.append("decision_levels_inconsistent")
+
+    if not ruling or verdict == GATE_NOT_EVALUATED:
+        reasons.append("no_ruling")
+        return _compliance(COMPLY_UNVERIFIABLE, size, None, reasons)
+
+    approved = ruling.get("approved_size_pct")
+    binding = bool(ruling.get("binding"))
+
+    if verdict == GATE_BLOCKED:
+        if size is None:
+            reasons.append("no_size_stated")
+            return _compliance(COMPLY_UNVERIFIABLE, size, approved, reasons, binding)
+        if float(size) > 1e-9:
+            reasons.append("size_on_a_blocked_trade")
+            return _compliance(COMPLY_VIOLATED, size, approved, reasons, binding)
+        return _compliance(COMPLY_OK, size, approved, reasons, binding)
+
+    if size is None:
+        reasons.append("no_size_stated")
+        return _compliance(COMPLY_UNVERIFIABLE, size, approved, reasons, binding)
+
+    if approved is None:
+        # A pass with no recorded ceiling: nothing to compare against.
+        reasons.append("no_ruling")
+        return _compliance(COMPLY_UNVERIFIABLE, size, approved, reasons, binding)
+
+    if float(size) > float(approved) + 1e-9:
+        reasons.append("size_exceeds_approved")
+        return _compliance(COMPLY_VIOLATED, size, approved, reasons, binding)
+    return _compliance(COMPLY_OK, size, approved, reasons, binding)
+
+
+def _compliance(status: str, size: Optional[float], approved: Optional[float],
+                reasons: list[str], binding: bool = False) -> dict[str, Any]:
+    return {
+        "status": status,
+        "final_size_pct": size,
+        "approved_size_pct": approved,
+        "reasons": list(reasons),
+        # Whether there was a *binding* ruling to verify against. Without one,
+        # "unverifiable" is unremarkable rather than a gap worth announcing --
+        # most runs have no portfolio attached at all.
+        "ruling_was_binding": bool(binding),
+        # True only for an outright violation. An unverifiable result is a gap in
+        # the record, not a breach of the ruling, and must not be reported as one.
+        "violated": status == COMPLY_VIOLATED,
+    }
+
+
+def render_compliance(result: Mapping[str, Any]) -> str:
+    """A violation notice for appending to a finished report, or "" when clean.
+
+    Only a violation and an unverifiable result produce text. A compliant decision
+    needs no annotation: the ruling is already in the report and the size matches
+    it, so a "complied" banner would be noise on every run.
+    """
+    status = str(result.get("status") or "")
+    if status == COMPLY_OK:
+        return ""
+    # An unverifiable result only warrants a notice when there was a *binding*
+    # ruling that went unchecked. Without one there was no constraint to enforce,
+    # and a banner on every run without a portfolio is noise that also breaks the
+    # documented contract that the free-text fallback passes the model's text
+    # through unchanged.
+    if status == COMPLY_UNVERIFIABLE and not result.get("ruling_was_binding"):
+        return ""
+    reasons = [COMPLIANCE_TEXT.get(r, r) for r in (result.get("reasons") or [])]
+    if not reasons:
+        return ""
+    head = ("**RISK GATE VIOLATION**" if result.get("violated")
+            else "**RISK GATE COMPLIANCE NOT VERIFIED**")
+    lines = ["", "---", "", head, ""]
+    if result.get("final_size_pct") is not None:
+        lines.append(f"Final size stated: {result['final_size_pct']}% of portfolio")
+    if result.get("approved_size_pct") is not None:
+        lines.append(f"Size approved by the gate: {result['approved_size_pct']}%")
+    lines.append("")
+    lines.extend(f"- {r}" for r in reasons)
+    if result.get("violated"):
+        lines.extend([
+            "",
+            "This notice was computed after the decision was written and the "
+            "decision above has NOT been altered — a size corrected in the "
+            "structured field while the narrative still argued for the original "
+            "would be a report that contradicts itself, and a reader believes the "
+            "narrative. Treat the approved size as the operative one.",
+        ])
+    return "\n".join(lines)

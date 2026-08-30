@@ -281,6 +281,8 @@ _FLAG_TEXT = {
     "target_wrong_side": "price target does not profit in the stated direction",
     "levels_without_direction": ("entry/stop/target given on a Hold, where they "
                                  "have no side"),
+    "size_zero_on_a_buy": ("the rating is a Buy but the position size is 0% — the "
+                           "rating reads as an instruction and the size cancels it"),
 }
 
 
@@ -360,6 +362,25 @@ class PortfolioDecision(BaseModel):
             "incorporate them; otherwise rely solely on the current analysis."
         ),
     )
+    position_size_pct: float | None = Field(
+        default=None,
+        description=(
+            "The final recommended position size as a PERCENTAGE of total "
+            "portfolio value, expressed 0-100 — write 5 for five percent, not "
+            "0.05. If a risk gate ruling in the prompt approved a maximum size, "
+            "this must not exceed it. Use 0 when the decision is to hold no "
+            "position. Omit it only when no size can be stated at all; an omitted "
+            "size is treated as unstated, not as zero."
+        ),
+    )
+    entry_price: float | None = Field(
+        default=None,
+        description="Optional entry price in the instrument's quote currency.",
+    )
+    stop_loss: float | None = Field(
+        default=None,
+        description="Optional stop-loss price in the instrument's quote currency.",
+    )
     price_target: float | None = Field(
         default=None,
         description="Optional target price in the instrument's quote currency.",
@@ -369,10 +390,50 @@ class PortfolioDecision(BaseModel):
         description="Optional recommended holding period, e.g. '3-6 months'.",
     )
 
-    @field_validator("price_target", mode="before")
+    @field_validator("price_target", "position_size_pct", "entry_price",
+                     "stop_loss", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    # No cross-field validator, for the same reason as TraderProposal: a rejected
+    # proposal is discarded whole by invoke_structured_or_freetext's free-text
+    # retry, so a validator that refused an out-of-limit size would destroy the
+    # very number a compliance check needs to see. Faults are computed below.
+
+    def levels(self) -> dict[str, object]:
+        """The decision's numeric facts, for a compliance check and for a ledger.
+
+        Mirrors :meth:`TraderProposal.levels`. Everything the model wrote passes
+        through unchanged; ``None`` means unstated and never zero, because a
+        decision that states no size is a different thing from one that recommends
+        holding nothing.
+
+        The size flags repeat ``TraderProposal``'s because the hazard is the same
+        at both ends of the pipeline: ``0.05`` is a plausible way to write five
+        percent and the two readings differ by 100x, so neither is assumed.
+        """
+        size = self.position_size_pct
+        flags: list[str] = []
+        if size is not None:
+            if 0 < size <= 1:
+                flags.append("size_ambiguous")
+            elif size > 100:
+                flags.append("size_out_of_range")
+        rating = self.rating.value.lower()
+        # A Buy with no position is a contradiction the reader would not catch:
+        # the rating reads as an instruction and the size quietly cancels it.
+        if size == 0 and rating in ("buy", "overweight"):
+            flags.append("size_zero_on_a_buy")
+        return {
+            "rating": self.rating.value,
+            "position_size_pct": size,
+            "entry_price": self.entry_price,
+            "stop_loss": self.stop_loss,
+            "price_target": self.price_target,
+            "time_horizon": self.time_horizon or None,
+            "flags": flags,
+        }
 
 
 def render_pm_decision(decision: PortfolioDecision) -> str:
@@ -390,10 +451,21 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         "",
         f"**Investment Thesis**: {decision.investment_thesis}",
     ]
+    if decision.position_size_pct is not None:
+        parts.extend(["", f"**Position Size**: {decision.position_size_pct}% "
+                          f"of portfolio"])
+    if decision.entry_price is not None:
+        parts.extend(["", f"**Entry Price**: {decision.entry_price}"])
+    if decision.stop_loss is not None:
+        parts.extend(["", f"**Stop Loss**: {decision.stop_loss}"])
     if decision.price_target is not None:
         parts.extend(["", f"**Price Target**: {decision.price_target}"])
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
+    flags = decision.levels()["flags"]
+    if flags:
+        parts.extend(["", "**Level Warnings**: " + ", ".join(
+            _FLAG_TEXT.get(f, f) for f in flags)])
     return "\n".join(parts)
 
 
