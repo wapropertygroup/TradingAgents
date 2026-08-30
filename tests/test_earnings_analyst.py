@@ -94,19 +94,22 @@ def _evidence(**overrides):
         ),
         analyst_count=Value(37, unit="count"),
     )
-    base = dict(
-        symbol="AAPL", as_of="2026-08-30", company_name="Apple Inc.", currency="USD",
-        periods={"0y": period},
-        calendar=EarningsCalendar(
+    base = {
+        "symbol": "AAPL",
+        "as_of": "2026-08-30",
+        "company_name": "Apple Inc.",
+        "currency": "USD",
+        "periods": {"0y": period},
+        "calendar": EarningsCalendar(
             next_date="2026-10-29", eps_estimate_avg=Value(1.98013, currency="USD")
         ),
-        surprises=[SurpriseEvent(
+        "surprises": [SurpriseEvent(
             fiscal_period_end="2026-06-30", eps_actual=Value(2.02),
             eps_estimate=Value(1.89243), eps_difference=Value(0.13),
             surprise_pct=Value(0.0674, unit="pct_dec"),
         )],
-        sources=["yfinance"],
-    )
+        "sources": ["yfinance"],
+    }
     base.update(overrides)
     return finalize_evidence(EarningsEvidence(**base))
 

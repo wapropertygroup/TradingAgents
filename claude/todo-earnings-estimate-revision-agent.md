@@ -60,15 +60,15 @@
 
 ## 2. Sequencing
 
-- [ ] **Step 1: Define normalized evidence and deterministic scoring** — implement typed models, missing-data semantics, fiscal-period labeling, symmetric change calculations for negative/near-zero EPS, coverage/confidence, and momentum bands. *Depends on: nothing*
-- [ ] **Step 2: Implement the point-in-time snapshot store** — create versioned SQLite storage and prove as-of selection/no-look-ahead behavior before any live adapter is connected. *Depends on: Step 1*
-- [ ] **Step 3: Implement provider adapters** — add yfinance core coverage, Alpha Vantage fallback/commentary, and partial A-share normalization, with fixture-based parsing and typed errors. *Depends on: Steps 1–2*
-- [ ] **Step 4: Register data categories and public tools** — wire provider methods/config and expose stable JSON tools without weakening explicit vendor-chain behavior. *Depends on: Step 3*
-- [ ] **Step 5: Implement the Earnings Analyst and report contract** — deterministic tool calls, structured narrative synthesis, deterministic numeric rendering, fallback/coverage flags, and the requested FY consensus/breadth/momentum presentation. *Depends on: Step 4*
-- [ ] **Step 6: Wire graph and state** — add the stable analyst spec, factory, ToolNode, conditional route, state initialization, checkpoint-safe selection, and full-state logging. *Depends on: Step 5*
-- [ ] **Step 7: Wire every downstream decision consumer** — Bull/Bear, Research Manager, Trader, risk debaters, and Portfolio Manager all receive the report explicitly. *Depends on: Step 6*
-- [ ] **Step 8: Wire CLI and report outputs** — stock-only selection, status transitions, streaming/final display, markdown report tree, and documentation. *Depends on: Step 6*
-- [ ] **Step 9: Run focused and full verification** — provider/unit/graph/CLI/output tests, then the complete test suite and self-review of the diff for accidental default/cost changes. *Depends on: Steps 7–8*
+- [x] **Step 1: Define normalized evidence and deterministic scoring** — implement typed models, missing-data semantics, fiscal-period labeling, symmetric change calculations for negative/near-zero EPS, coverage/confidence, and momentum bands. *Depends on: nothing*
+- [x] **Step 2: Implement the point-in-time snapshot store** — create versioned SQLite storage and prove as-of selection/no-look-ahead behavior before any live adapter is connected. *Depends on: Step 1*
+- [x] **Step 3: Implement provider adapters** — add yfinance core coverage, Alpha Vantage fallback/commentary, and partial A-share normalization, with fixture-based parsing and typed errors. *Depends on: Steps 1–2*
+- [x] **Step 4: Register data categories and public tools** — wire provider methods/config and expose stable JSON tools without weakening explicit vendor-chain behavior. *Depends on: Step 3*
+- [x] **Step 5: Implement the Earnings Analyst and report contract** — deterministic tool calls, structured narrative synthesis, deterministic numeric rendering, fallback/coverage flags, and the requested FY consensus/breadth/momentum presentation. *Depends on: Step 4*
+- [x] **Step 6: Wire graph and state** — add the stable analyst spec, factory, ToolNode, conditional route, state initialization, checkpoint-safe selection, and full-state logging. *Depends on: Step 5*
+- [x] **Step 7: Wire every downstream decision consumer** — Bull/Bear, Research Manager, Trader, risk debaters, and Portfolio Manager all receive the report explicitly. *Depends on: Step 6*
+- [x] **Step 8: Wire CLI and report outputs** — stock-only selection, status transitions, streaming/final display, markdown report tree, and documentation. *Depends on: Step 6*
+- [x] **Step 9: Run focused and full verification** — provider/unit/graph/CLI/output tests, then the complete test suite and self-review of the diff for accidental default/cost changes. *Depends on: Steps 7–8*
 - [ ] **Step 10: Final audit and handoff** — check every todo item, report test results/data limitations, and propose a commit message. *Depends on: Step 9*
 
 ## 3. Impact Analysis

@@ -213,6 +213,52 @@ class TestCheckpointSignature(unittest.TestCase):
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         self.assertEqual(base, g._run_signature("stock"))
 
+    def test_adding_the_earnings_analyst_starts_a_fresh_checkpoint(self):
+        """Opting an analyst in changes the graph, so a resume must not continue.
+
+        Resuming the old graph under the new selection would leave
+        ``earnings_report`` empty for the whole run while every downstream prompt
+        had been rebuilt to expect it — a silently incomplete analysis rather
+        than a loud failure.
+        """
+        global _should_crash
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        g = object.__new__(TradingAgentsGraph)
+        g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
+
+        g.selected_analysts = ("market", "social", "news", "fundamentals")
+        without = g._run_signature("stock")
+        g.selected_analysts = ("market", "social", "news", "fundamentals", "earnings")
+        with_earnings = g._run_signature("stock")
+
+        self.assertNotEqual(without, with_earnings)
+        self.assertIn("earnings", with_earnings)
+        self.assertNotIn("earnings", without)
+
+        # A crashed run under the four-analyst selection leaves a checkpoint...
+        builder = _build_graph()
+        _should_crash = True
+        try:
+            with get_checkpointer(self.tmpdir, self.ticker) as saver:
+                graph = builder.compile(checkpointer=saver)
+                with self.assertRaises(RuntimeError):
+                    graph.invoke(
+                        {"count": 0},
+                        config={"configurable": {
+                            "thread_id": thread_id(self.ticker, self.date, without)
+                        }},
+                    )
+        finally:
+            _should_crash = False
+
+        self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, without))
+        # ...which the earnings-enabled graph cannot see.
+        self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date, with_earnings))
+        self.assertIsNone(
+            checkpoint_step(self.tmpdir, self.ticker, self.date, with_earnings)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

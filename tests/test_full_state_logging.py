@@ -12,7 +12,6 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock, patch
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 

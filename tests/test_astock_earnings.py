@@ -56,9 +56,8 @@ class RefusalTests(AShareTestCase):
 
         with patch.object(ase, "_eps_forecast_ths_frame", explode):
             for symbol in ("AAPL", "SPY", "BTC-USD", "7203.T", "0700.HK"):
-                with self.subTest(symbol=symbol):
-                    with self.assertRaises(NoMarketDataError):
-                        ase.build_earnings_evidence(symbol, AS_OF)
+                with self.subTest(symbol=symbol), self.assertRaises(NoMarketDataError):
+                    ase.build_earnings_evidence(symbol, AS_OF)
 
     def test_decorated_a_share_forms_are_accepted(self):
         for symbol in ("600519", "sh600519", "600519.SS", "600519.SH"):

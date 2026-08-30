@@ -333,16 +333,15 @@ class EntitlementDegradationTests(AlphaVantageTestCase):
         """It is the core payload; swallowing it would report a false absence."""
         with patch.object(av, "_make_api_request", _responder({
             "EARNINGS": AlphaVantageRateLimitError("daily quota exhausted"),
-        })):
-            with self.assertRaises(AlphaVantageRateLimitError):
-                av.build_earnings_evidence("IBM", AS_OF)
+        })), self.assertRaises(AlphaVantageRateLimitError):
+            av.build_earnings_evidence("IBM", AS_OF)
 
     def test_a_malformed_core_payload_raises_no_market_data(self):
         for payload in ("not json at all", {}, {"symbol": "IBM"}):
-            with self.subTest(payload=payload):
-                with patch.object(av, "_make_api_request", _responder({"EARNINGS": payload})):
-                    with self.assertRaises(NoMarketDataError):
-                        av.build_earnings_evidence("IBM", AS_OF)
+            with self.subTest(payload=payload), patch.object(
+                av, "_make_api_request", _responder({"EARNINGS": payload})
+            ), self.assertRaises(NoMarketDataError):
+                av.build_earnings_evidence("IBM", AS_OF)
 
     def test_neither_estimates_nor_surprises_raises_so_the_chain_continues(self):
         empty = {"symbol": "X", "quarterlyEarnings": []}
@@ -350,9 +349,8 @@ class EntitlementDegradationTests(AlphaVantageTestCase):
             "EARNINGS": empty,
             "EARNINGS_ESTIMATES": AlphaVantageRateLimitError("premium"),
             "EARNINGS_CALENDAR": CALENDAR_CSV,
-        })):
-            with self.assertRaises(NoMarketDataError):
-                av.build_earnings_evidence("X", AS_OF)
+        })), self.assertRaises(NoMarketDataError):
+            av.build_earnings_evidence("X", AS_OF)
 
     def test_estimates_returning_no_rows_is_a_named_gap(self):
         evidence = self.build({

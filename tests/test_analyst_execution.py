@@ -49,6 +49,41 @@ class AnalystExecutionPlanTests(unittest.TestCase):
         self.assertEqual(plan.specs[5].agent_node, "Hot Money Tracker")
         self.assertEqual(plan.specs[6].agent_node, "Lock-up Monitor")
 
+    def test_earnings_spec_strings_are_stable(self):
+        """These strings are graph node names and a state key.
+
+        The tool and clear node names are matched exactly by
+        ``ConditionalLogic.should_continue_earnings``, and ``report_key`` is what
+        every downstream consumer reads, so a rename here silently detaches the
+        analyst from its own routing.
+        """
+        spec = build_analyst_execution_plan(["earnings"]).specs[0]
+        self.assertEqual(spec.key, "earnings")
+        self.assertEqual(spec.agent_node, "Earnings Analyst")
+        self.assertEqual(spec.clear_node, "Msg Clear Earnings")
+        self.assertEqual(spec.tool_node, "tools_earnings")
+        self.assertEqual(spec.report_key, "earnings_report")
+
+    def test_earnings_can_be_selected_in_any_position(self):
+        for keys in (
+            ["earnings"],
+            ["earnings", "market"],
+            ["market", "earnings", "news"],
+            ["market", "social", "news", "fundamentals", "earnings"],
+        ):
+            with self.subTest(keys=tuple(keys)):
+                plan = build_analyst_execution_plan(keys)
+                self.assertEqual([spec.key for spec in plan.specs], keys)
+
+    def test_every_report_key_is_unique_across_all_analysts(self):
+        """Two analysts sharing a report key would silently overwrite each other."""
+        from tradingagents.graph.analyst_execution import ANALYST_NODE_SPECS
+
+        keys = [spec.report_key for spec in ANALYST_NODE_SPECS.values()]
+        self.assertEqual(len(keys), len(set(keys)), keys)
+        node_names = [spec.agent_node for spec in ANALYST_NODE_SPECS.values()]
+        self.assertEqual(len(node_names), len(set(node_names)), node_names)
+
 
 class AnalystWallTimeTrackerTests(unittest.TestCase):
     def test_records_wall_time_when_analyst_completes(self):

@@ -484,7 +484,7 @@ def get_fundamentals(symbol: str, curr_date: str | None = None) -> str:
     return out
 
 
-def _eps_forecast_ths_frame(code: str) -> "pd.DataFrame | None":
+def _eps_forecast_ths_frame(code: str) -> pd.DataFrame | None:
     """The raw 同花顺 consensus-forecast table, or None.
 
     Split out from :func:`_eps_forecast_ths` so the earnings adapter can inspect

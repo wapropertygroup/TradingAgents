@@ -90,6 +90,7 @@ class SafeCoercionTests(unittest.TestCase):
 
     def test_safe_date_accepts_the_shapes_providers_actually_send(self):
         import datetime as dt
+
         import pandas as pd
 
         cases = [
