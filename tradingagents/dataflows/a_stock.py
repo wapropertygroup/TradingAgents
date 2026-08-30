@@ -484,25 +484,39 @@ def get_fundamentals(symbol: str, curr_date: str | None = None) -> str:
     return out
 
 
-def _eps_forecast_ths(code: str) -> str:
-    """同花顺 consensus EPS. Optional: neither 东财 nor 新浪 publishes it, and a
-    missing forecast must not fail the whole fundamentals call."""
+def _eps_forecast_ths_frame(code: str) -> "pd.DataFrame | None":
+    """The raw 同花顺 consensus-forecast table, or None.
+
+    Split out from :func:`_eps_forecast_ths` so the earnings adapter can inspect
+    the frame (row count, headers) instead of re-scraping the same page or
+    reverse-engineering a markdown string. One fetch implementation, two
+    renderings.
+    """
     try:
         html = _http(f"https://basic.10jqka.com.cn/{code}/worth.html",
                      encoding="gbk", headers={"User-Agent": _UA})
     except Exception as exc:  # noqa: BLE001
         logger.info("a_stock: 同花顺 EPS forecast unavailable for %s: %s", code, exc)
-        return ""
+        return None
     # The page embeds the forecast table; pull the first table that mentions 预测.
     try:
         tables = pd.read_html(io.StringIO(html))
     except Exception:  # noqa: BLE001 - page shape changed or no tables
-        return ""
+        return None
     for tbl in tables:
         text = " ".join(str(c) for c in tbl.columns)
         if "预测" in text or "预计" in text:
-            return tbl.head(6).to_markdown(index=False)
-    return ""
+            return tbl
+    return None
+
+
+def _eps_forecast_ths(code: str) -> str:
+    """同花顺 consensus EPS. Optional: neither 东财 nor 新浪 publishes it, and a
+    missing forecast must not fail the whole fundamentals call."""
+    tbl = _eps_forecast_ths_frame(code)
+    if tbl is None:
+        return ""
+    return tbl.head(6).to_markdown(index=False)
 
 
 # ---------------------------------------------------------------------------

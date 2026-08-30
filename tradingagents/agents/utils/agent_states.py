@@ -59,6 +59,7 @@ class AgentState(MessagesState):
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    earnings_report: Annotated[str, "Report from the Earnings & Estimate Revision Analyst"]
     policy_report: Annotated[str, "Report from the A-share Policy Analyst"]
     hot_money_report: Annotated[str, "Report from the A-share Hot Money Tracker"]
     lockup_report: Annotated[str, "Report from the A-share Lock-up Monitor"]
@@ -77,3 +78,4 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+    portfolio_context: Annotated[str, "Caller-supplied holdings and limit verdicts injected at run start; empty when the caller has no portfolio"]

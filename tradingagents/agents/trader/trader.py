@@ -10,6 +10,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_portfolio_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -37,6 +38,22 @@ def create_trader(llm):
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
         market_constraints = _A_SHARE_CONSTRAINTS if is_a_share(company_name) else ""
+        # Included directly, not left to the Research Manager's plan to relay.
+        # The plan is a summary, and estimate revision direction is exactly the
+        # kind of dated, countable detail a summary drops first.
+        portfolio_block = get_portfolio_block(
+            state, "The holder's current portfolio and stated limits:")
+        earnings_report = state.get("earnings_report", "")
+        earnings_block = (
+            f"\n\nEarnings & estimate-revision evidence:\n{earnings_report}\n\n"
+            "Every figure and the momentum band above were computed from provider "
+            "data; report them as given and do not recompute or round them. Fields "
+            "marked unavailable, and a band of Insufficient Data, mean the coverage "
+            "does not exist — treat them as unknown rather than neutral, and do not "
+            "size a position as though the signal were confirmed."
+            if earnings_report
+            else ""
+        )
 
         messages = [
             {
@@ -57,7 +74,9 @@ def create_trader(llm):
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
+                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n"
+                    f"{earnings_block}\n"
+                    f"{portfolio_block}\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },

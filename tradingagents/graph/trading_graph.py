@@ -15,6 +15,8 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_earnings_commentary,
+    get_earnings_evidence,
     get_fundamentals,
     get_global_news,
     get_income_statement,
@@ -80,11 +82,15 @@ class TradingAgentsGraph:
         config: dict[str, Any] = None,
         callbacks: list | None = None,
         progress_callback=None,
+        portfolio_context: str = "",
     ):
         """Initialize the trading agents graph and components.
 
         Args:
-            selected_analysts: List of analyst types to include
+            selected_analysts: List of analyst types to include. The default four
+                are unchanged; ``"earnings"`` (and the three A-share specialists)
+                are opt-in, so an existing caller adds no provider dependency or
+                LLM cost by upgrading.
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
@@ -158,6 +164,14 @@ class TradingAgentsGraph:
 
         # Graph-shape-affecting run choices, kept for the checkpoint signature.
         self.selected_analysts = tuple(selected_analysts)
+
+        # Caller-supplied holdings block. Deliberately NOT part of
+        # _run_signature: it changes between runs of the same ticker (a portfolio
+        # moves daily) and folding it into the checkpoint key would make every
+        # resume a cold start. It reaches only the decision agents, all of which
+        # run after every analyst, so a resumed run picks it up on the turn that
+        # uses it.
+        self.portfolio_context = portfolio_context or ""
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
@@ -239,6 +253,16 @@ class TradingAgentsGraph:
                     get_income_statement,
                     get_profit_forecast,
                     get_industry_comparison,
+                ]
+            ),
+            "earnings": ToolNode(
+                [
+                    # Both are called deterministically by the analyst's first
+                    # pass rather than chosen by the model, so both must be
+                    # executable here or the calls fail and the report reports
+                    # its own plumbing as missing evidence.
+                    get_earnings_evidence,
+                    get_earnings_commentary,
                 ]
             ),
             "policy": ToolNode([get_news, get_global_news]),
@@ -466,6 +490,7 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            portfolio_context=self.portfolio_context,
         )
         args = self.propagator.get_graph_args()
 
@@ -533,14 +558,32 @@ class TradingAgentsGraph:
         return final_state, self.process_signal(final_state["final_trade_decision"])
 
     def _log_state(self, trade_date, final_state):
-        """Log the final state to a JSON file."""
+        """Log the final state to a JSON file.
+
+        Every specialist report is written, using ``.get`` with an empty default
+        rather than subscripting. Two separate reasons, and both have bitten:
+
+        * An unselected analyst never populates its key, so subscripting a report
+          that was not part of the run raises ``KeyError`` *after* the analysis has
+          completed and the API spend is gone. That is why the four original
+          analysts are read this way too.
+        * The three A-share reports and this one were being dropped from the audit
+          log even when they had run, because the dict below was only ever updated
+          for the original four. The log read as a complete record while silently
+          omitting whichever specialists were selected — which is the failure mode
+          that makes an audit trail worse than none.
+        """
         self.log_states_dict[str(trade_date)] = {
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
-            "market_report": final_state["market_report"],
-            "sentiment_report": final_state["sentiment_report"],
-            "news_report": final_state["news_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
+            "market_report": final_state.get("market_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "earnings_report": final_state.get("earnings_report", ""),
+            "policy_report": final_state.get("policy_report", ""),
+            "hot_money_report": final_state.get("hot_money_report", ""),
+            "lockup_report": final_state.get("lockup_report", ""),
             "investment_debate_state": {
                 "bull_history": final_state["investment_debate_state"]["bull_history"],
                 "bear_history": final_state["investment_debate_state"]["bear_history"],

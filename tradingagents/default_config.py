@@ -149,6 +149,22 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "fundamental_data": "a_stock,yfinance",      # Options: alpha_vantage, yfinance, a_stock
         "news_data": "a_stock,yfinance",             # Options: alpha_vantage, yfinance, a_stock
         "signal_data": "a_stock",             # A-share only, free direct sources
+        # Earnings estimates and revisions. yfinance leads here rather than
+        # a_stock — the reverse of the four core chains above — because Yahoo
+        # publishes a real consensus revision history (7/30/60/90-day trend plus
+        # up/down analyst counts) for the venues it covers, A-shares in Yahoo
+        # form included, while 同花顺 offers only a current snapshot with no
+        # history behind it. The hazard that puts a_stock first elsewhere does
+        # not apply: this vendor refuses a bare 6-digit code by string inspection
+        # with no network call and raises on an unknown symbol, so it cannot
+        # answer emptily and stop the chain. Add alpha_vantage to this list to
+        # get real announcement dates and release timing (needs an API key).
+        "earnings_data": "yfinance,a_stock",   # Options: yfinance, alpha_vantage, a_stock
+        # Earnings-call commentary. Alpha Vantage's transcript endpoint is the
+        # only source, is premium-gated, and needs ALPHA_VANTAGE_API_KEY. Left
+        # configured but keyless installs pay nothing: the vendor raises before
+        # any network call and this optional category degrades to a stated gap.
+        "earnings_commentary": "alpha_vantage",  # Options: alpha_vantage (needs key)
         "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

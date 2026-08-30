@@ -66,6 +66,7 @@ Our framework decomposes complex trading tasks into specialized roles.
 - Sentiment Analyst: Aggregates news headlines, StockTwits, and Reddit chatter into a single sentiment read to gauge short-term market mood.
 - News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
 - Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
+- Earnings & Estimate Revision Analyst (**opt-in**): Reads the *direction* of analyst consensus rather than its level — how far consensus EPS has moved over 7/30/90 days, how many analysts moved it each way, the surprise record, and post-earnings drift. See [Earnings Analyst](#earnings-analyst) below.
 
 <p align="center">
   <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
@@ -232,6 +233,102 @@ print(decision)
 ```
 
 See `tradingagents/default_config.py` for all configuration options.
+
+## Earnings Analyst
+
+The Earnings & Estimate Revision Analyst is **opt-in**. The default analyst
+selection is unchanged, so upgrading adds no API key requirement, no extra
+provider call, and no extra LLM cost to an existing run.
+
+```python
+ta = TradingAgentsGraph(
+    selected_analysts=["market", "social", "news", "fundamentals", "earnings"],
+    config=config,
+)
+```
+
+In the CLI it appears as a checkbox, "Earnings & Estimate Revision Analyst", for
+stock tickers. It is filtered out for crypto alongside the Fundamentals Analyst.
+
+### What it reports
+
+Everything numeric is computed by code from provider data and rendered directly
+into the report; the language model only adds guidance, catalysts, risks and data
+gaps, and cannot alter a figure or the momentum band.
+
+| Field | yfinance (default) | Alpha Vantage (opt-in) | 同花顺 (A-share fallback) |
+|---|---|---|---|
+| Consensus EPS, by period | yes | yes (premium endpoint) | yes, per fiscal year |
+| EPS trend at 7 / 30 / 60 / 90 days | yes | yes (premium endpoint) | no — accrues locally |
+| Analyst up/down revision counts | 7d, 30d | 7d, 30d | no |
+| 90-day revision counts | **no** | **no** | no |
+| Analyst coverage count | yes | yes | yes (预测机构数) |
+| Consensus revenue | yes | yes (premium endpoint) | no |
+| Revenue revision history | **no** — accrues locally | yes (premium endpoint) | no |
+| Next earnings date | yes | yes | no |
+| Release timing (before/after market) | **no** | yes | no |
+| Announcement dates | scrape only, often fails | yes | no |
+| Surprise history | yes | yes | no |
+| Post-earnings drift (+1/+5/+20/+60 sessions) | needs announcement dates | yes | no |
+| Earnings-call transcript | no | yes (premium endpoint) | no |
+| Whisper expectations | **no source** | **no source** | **no source** |
+| Consensus margin revisions | **no source** | **no source** | **no source** |
+
+Momentum is a weighted mean of the revision signals that are actually present,
+renormalized over available weight, banded as Strong Positive / Positive /
+Neutral / Negative / Strong Negative. When too few signals exist the band is
+**Insufficient Data** — a statement about coverage, not a neutral verdict on the
+company. A field with no source is rendered "unavailable" with the reason; it is
+never zero, and the prompt forbids the model from filling it in.
+
+Percentage changes are **symmetric** — `2(new−old)/(|new|+|old|)` — not ordinary
+percentage change, which divides by zero at `old == 0` and inverts sign when
+`old < 0`. Yahoo's own `growth` column has that sign bug and is ignored: a loss
+narrowing from −2.61 to −2.44 is an upgrade, and ordinary change calls it a
+downgrade.
+
+### Point-in-time limitation
+
+**A historical `trade_date` is answered from stored snapshots or not at all.**
+Nothing upstream sells back last month's consensus — Yahoo's lookbacks are
+relative to *now*, so asked on a later date they describe a later window. Filling
+a past date with today's figures would be a future function that is invisible
+downstream, because the numbers look exactly like a measurement taken then.
+
+So every run appends a dated observation to `earnings_snapshots.sqlite3` under
+your configured `data_cache_dir`, and a historical run reads the newest
+observation dated at or before the requested date. Before the first run there are
+no vintages, and such a request reports `pit_unavailable` rather than guessing.
+
+That store also fills horizons the vendors do not publish at all — Yahoo's
+revenue revisions, and every horizon for A-shares — so a symbol analysed
+regularly grows a real revision history locally. Each such value carries its
+true age, and a vintage too old for its slot is refused rather than stretched.
+A single vintage is not enough to earn a band: the 30-day slot alone is 0.35 of
+the signal weight, under the 0.50 floor, so a 同花顺-only A-share reports
+Insufficient Data until roughly a month of runs has filled both the 7- and
+30-day slots.
+
+The file is a local cache of an unrecoverable series: a code rollback may leave
+it unused, but do not delete it expecting it to be refetched.
+
+### Provider configuration
+
+```python
+config["data_vendors"]["earnings_data"] = "yfinance,a_stock"   # default
+config["data_vendors"]["earnings_data"] = "alpha_vantage,yfinance,a_stock"
+config["data_vendors"]["earnings_commentary"] = "alpha_vantage" # needs a key
+```
+
+`yfinance` leads by default — the reverse of the four core chains, where
+`a_stock` leads. Yahoo publishes a real revision history for every venue it
+covers, A-shares in Yahoo form (`600519.SS`) included, in CNY. The hazard that
+puts `a_stock` first elsewhere does not apply here: this adapter refuses a bare
+six-digit code by string inspection with no network call and raises on an unknown
+symbol, so it cannot answer emptily and stop the chain. Adding `alpha_vantage`
+buys real announcement dates and release timing, which is what post-earnings
+drift needs; its estimate and transcript endpoints are premium, and on a free key
+they degrade to a stated data gap rather than failing the run.
 
 ## Persistence and Recovery
 

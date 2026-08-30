@@ -49,6 +49,12 @@ class ConditionalLogic:
             return "tools_fundamentals"
         return "Msg Clear Fundamentals"
 
+    def should_continue_earnings(self, state: AgentState):
+        """Continue the deterministic earnings evidence/commentary tool round."""
+        if state["messages"][-1].tool_calls:
+            return "tools_earnings"
+        return "Msg Clear Earnings"
+
     def should_continue_policy(self, state: AgentState):
         """Determine if policy analysis should continue its tool loop."""
         if state["messages"][-1].tool_calls:

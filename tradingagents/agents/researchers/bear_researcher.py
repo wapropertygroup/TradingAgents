@@ -18,6 +18,7 @@ def create_bear_researcher(llm):
         policy_report = state.get("policy_report", "")
         hot_money_report = state.get("hot_money_report", "")
         lockup_report = state.get("lockup_report", "")
+        earnings_report = state.get("earnings_report", "")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
@@ -47,9 +48,24 @@ Latest world affairs news: {news_report}
 Policy analysis report: {policy_report}
 Hot money / capital-flow report: {hot_money_report}
 Lock-up / insider-reduction report: {lockup_report}
+Earnings & estimate-revision report (high priority when present): {earnings_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.
+
+Interrogate the earnings report rather than accepting its headline. Ask how much
+coverage the momentum band actually rests on: a band computed from a thin signal
+set, from two analysts, or from horizons that disagree with each other is far
+weaker than one built on broad participation, and the report states its own
+coverage weight, confidence and retained discrepancies so you can check. Note
+where estimates are being revised *down*, where breadth is one-sided against the
+company, where a beat came against a lowered bar, and where post-earnings drift
+was negative. Treat estimate revision direction and breadth as evidence in their
+own right, not as a restatement of fundamentals. Where a field is marked
+unavailable or momentum is Insufficient Data, that is an absence of analyst
+coverage or vendor history — do not substitute a guess, and do not read it as
+neutral, but do say plainly that the bull case cannot lean on evidence that is
+not there.
 """ + get_language_instruction()
 
         response = llm.invoke(prompt)

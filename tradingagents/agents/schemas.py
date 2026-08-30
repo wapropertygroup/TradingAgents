@@ -339,3 +339,70 @@ def render_sentiment_report(report: SentimentReport) -> str:
         "",
         report.narrative,
     ])
+
+
+# ---------------------------------------------------------------------------
+# Earnings & Estimate Revision Analyst
+# ---------------------------------------------------------------------------
+
+
+class EarningsNarrative(BaseModel):
+    """Bounded qualitative synthesis layered over code-owned earnings evidence.
+
+    This schema intentionally contains no consensus values, revision counts, or
+    momentum label. Those fields are computed and rendered from the evidence
+    tool result, so a language model cannot silently rewrite them.
+    """
+
+    guidance_and_commentary: str = Field(
+        description=(
+            "Sourced summary of management guidance and commentary present in "
+            "the supplied evidence. Say 'Unavailable' when it is absent."
+        ),
+    )
+    catalysts: list[str] = Field(
+        default_factory=list,
+        description="Up to five earnings-related catalysts supported by the evidence.",
+    )
+    risks: list[str] = Field(
+        default_factory=list,
+        description="Up to five earnings-related risks supported by the evidence.",
+    )
+    data_gaps: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Missing, stale, partial-coverage, or low-confidence fields. Preserve "
+            "the provider's unavailable disclosures; never fill a gap by inference."
+        ),
+    )
+    confidence: Literal["low", "medium", "high"] = Field(
+        description="Confidence in the qualitative synthesis only.",
+    )
+
+    @field_validator("catalysts", "risks", mode="after")
+    @classmethod
+    def _limit_bullets(cls, value: list[str]) -> list[str]:
+        return value[:5]
+
+
+def render_earnings_narrative(narrative: EarningsNarrative) -> str:
+    """Render only qualitative fields; numeric evidence is rendered elsewhere."""
+
+    def bullets(items: list[str]) -> str:
+        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
+
+    return "\n".join([
+        "## Guidance & Management Commentary",
+        narrative.guidance_and_commentary or "Unavailable",
+        "",
+        "## Catalysts",
+        bullets(narrative.catalysts),
+        "",
+        "## Risks",
+        bullets(narrative.risks),
+        "",
+        "## Data Gaps",
+        bullets(narrative.data_gaps),
+        "",
+        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+    ])

@@ -22,6 +22,7 @@ class Propagator:
         asset_type: str = "stock",
         past_context: str = "",
         instrument_context: str = "",
+        portfolio_context: str = "",
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -30,6 +31,15 @@ class Propagator:
         ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
+
+        ``portfolio_context`` is a caller-supplied block describing what the
+        holder already owns and which of their stated limits the holding already
+        breaches. Empty is the normal case — most callers have no portfolio — and
+        empty must read as *unknown*, not as *no holdings*: an agent told nothing
+        about a portfolio must not conclude the position is being opened from
+        flat. Only the decision-making agents receive it; the analysts do not, so
+        that a fundamentals or news read cannot be shaded by what the reader
+        happens to hold.
         """
         return {
             "messages": [("human", company_name)],
@@ -38,6 +48,7 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
+            "portfolio_context": portfolio_context,
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",
@@ -64,6 +75,7 @@ class Propagator:
             ),
             "market_report": "",
             "fundamentals_report": "",
+            "earnings_report": "",
             "sentiment_report": "",
             "news_report": "",
             "policy_report": "",

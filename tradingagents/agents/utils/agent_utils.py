@@ -8,6 +8,10 @@ from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
+from tradingagents.agents.utils.earnings_data_tools import (
+    get_earnings_commentary,
+    get_earnings_evidence,
+)
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet,
     get_cashflow,
@@ -43,6 +47,8 @@ __all__ = [
     "get_balance_sheet",
     "get_cashflow",
     "get_income_statement",
+    "get_earnings_evidence",
+    "get_earnings_commentary",
     "get_news",
     "get_global_news",
     "get_insider_transactions",
@@ -185,6 +191,61 @@ def build_instrument_context(
             "assume company fundamentals are available."
         )
     return context
+
+
+def get_portfolio_context_from_state(state: Mapping[str, Any]) -> str:
+    """The caller's holdings and limit verdicts, or "" when none was supplied.
+
+    Returned verbatim. The block is produced by a deterministic engine on the
+    caller's side (ystocker's ``exposure.render_block``), and every number in it —
+    the floors, the ceilings, the before/after deltas — was computed there
+    precisely so no model has to do the arithmetic. Reformatting or summarising it
+    here would put that arithmetic back in reach of a language model, which is the
+    one thing the block exists to prevent.
+
+    Empty is the common case and means *unknown*, not *flat*. A consumer must not
+    turn silence into an assumption that nothing is held.
+    """
+    context = state.get("portfolio_context")
+    if isinstance(context, str) and context.strip():
+        return context
+    return ""
+
+
+#: Framing for the holdings block, written once so five prompts cannot drift.
+#: The rules are the load-bearing part. Two failure modes they exist to stop:
+#: computing a headroom figure from a floor (the floor is a lower bound, so the
+#: difference to the limit is not a number the data supports), and reading an
+#: absent block as an empty portfolio.
+_PORTFOLIO_RULES = (
+    "Rules for using it. Every figure was computed by a deterministic engine "
+    "before this run began — quote them as given and never recompute, re-derive "
+    "or round them. A company-level exposure is a measured FLOOR because funds "
+    "disclose only their largest holdings, so each name carries a floor and a "
+    "ceiling and the true value lies between them; do not treat the midpoint as "
+    "an estimate and do not compute remaining headroom against the floor. The "
+    "verdicts are three-valued and only PASS means a limit was verified to hold: "
+    "BREACH means the floor alone exceeds the limit, and INDETERMINATE means the "
+    "disclosures cannot rule out a breach — which is a real finding that should "
+    "reduce conviction, not a gap to resolve with an assumption. Limits are the "
+    "holder's own stated policy; a limit that is absent was never set and must "
+    "not be invented. Recommend a size that respects a BREACH rather than "
+    "arguing around it."
+)
+
+
+def get_portfolio_block(state: Mapping[str, Any], heading: str) -> str:
+    """The holdings block wrapped in its heading and rules, or "" when absent.
+
+    Empty means the caller supplied no portfolio, which is *unknown* and not
+    *flat*. Returning "" rather than a "no holdings" sentence is deliberate: a
+    sentence would license the reader to size as though opening from zero, and
+    most callers of this framework genuinely have no portfolio attached.
+    """
+    context = get_portfolio_context_from_state(state)
+    if not context:
+        return ""
+    return f"\n{heading}\n{context}\n\n{_PORTFOLIO_RULES}\n"
 
 
 def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:

@@ -18,6 +18,7 @@ def create_bull_researcher(llm):
         policy_report = state.get("policy_report", "")
         hot_money_report = state.get("hot_money_report", "")
         lockup_report = state.get("lockup_report", "")
+        earnings_report = state.get("earnings_report", "")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
@@ -45,9 +46,12 @@ Latest world affairs news: {news_report}
 Policy analysis report: {policy_report}
 Hot money / capital-flow report: {hot_money_report}
 Lock-up / insider-reduction report: {lockup_report}
+Earnings & estimate-revision report (high priority when present): {earnings_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
 Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
+
+When the earnings report shows estimates being revised upward with broad analyst participation, that is among your strongest available evidence: it is the sell-side marking the company up, dated and countable. Cite the direction, the breadth and the period. Treat estimate revision direction and breadth as evidence in their own right, not as a restatement of fundamentals. Where this report marks a field unavailable or its momentum band Insufficient Data, that is an absence of analyst coverage or vendor history — do not substitute a guess, and do not read it as neutral.
 """ + get_language_instruction()
 
         response = llm.invoke(prompt)

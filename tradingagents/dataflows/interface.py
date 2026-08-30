@@ -36,6 +36,11 @@ from .a_stock import (
     get_northbound_flow as get_astock_northbound_flow,
     get_profit_forecast as get_astock_profit_forecast,
 )
+from .a_stock_earnings import get_earnings_evidence as get_astock_earnings_evidence
+from .alpha_vantage_earnings import (
+    get_earnings_commentary as get_alpha_vantage_earnings_commentary,
+    get_earnings_evidence as get_alpha_vantage_earnings_evidence,
+)
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
@@ -47,6 +52,7 @@ from .y_finance import (
     get_stock_stats_indicators_window,
     get_YFin_data_online,
 )
+from .yfinance_earnings import get_earnings_evidence as get_yfinance_earnings_evidence
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 
 logger = logging.getLogger(__name__)
@@ -102,6 +108,21 @@ TOOLS_CATEGORIES = {
             "get_lockup_expiry", "get_industry_comparison",
         ],
     },
+    "earnings_data": {
+        "description": (
+            "Analyst EPS/revenue consensus, revision trend and breadth, earnings "
+            "calendar, surprise history, and post-earnings drift"
+        ),
+        "tools": [
+            "get_earnings_evidence",
+        ],
+    },
+    "earnings_commentary": {
+        "description": "Earnings-call transcript / management commentary",
+        "tools": [
+            "get_earnings_commentary",
+        ],
+    },
 }
 
 VENDOR_LIST = [
@@ -128,7 +149,22 @@ VENDOR_LIST = [
 # for three of seven analysts, and 东财 calls are serialized behind a one-second
 # floor, so throttling is expected under a full run. Aborting there discarded the
 # other six analysts' completed work and their API spend.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "signal_data"}
+#
+# ``earnings_commentary`` is optional for the same shape of reason: its only
+# vendor is Alpha Vantage, whose transcript endpoint is premium-gated, so the
+# common outcome on a free key is an entitlement notice that exhausts the chain.
+# A missing transcript is a data gap the Earnings Analyst states plainly; it must
+# not abort a report whose numeric evidence is already in hand.
+#
+# ``earnings_data`` is deliberately NOT here. It is the Earnings Analyst's core
+# payload, so a vendor that breaks outright should be loud, exactly as a broken
+# fundamentals or news primary is. The routine "this instrument has no earnings"
+# and "no point-in-time vintage exists" outcomes are not failures at all — the
+# adapters return them as structured evidence with an explicit status, so they
+# never reach this degradation path.
+OPTIONAL_CATEGORIES = {
+    "macro_data", "prediction_markets", "signal_data", "earnings_commentary",
+}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -197,6 +233,26 @@ VENDOR_METHODS = {
     "get_dragon_tiger_board": {"a_stock": get_astock_dragon_tiger_board},
     "get_lockup_expiry": {"a_stock": get_astock_lockup_expiry},
     "get_industry_comparison": {"a_stock": get_astock_industry_comparison},
+    # earnings_data. yfinance leads: it publishes a real 7/30/60/90-day consensus
+    # trend and up/down revision counts for every venue it covers — including
+    # Shanghai and Shenzhen listings in Yahoo form, in CNY — which is the signal
+    # this analyst exists to read. It self-selects safely here in a way it cannot
+    # for prices or news: a bare 6-digit A-share code is refused by string
+    # inspection with no network call, and an unknown symbol raises
+    # NoMarketDataError, so both fall through rather than succeeding emptily.
+    # a_stock backs it up for bare 沪深京 codes with 同花顺's current consensus
+    # snapshot, which carries no history and reports momentum as insufficient.
+    "get_earnings_evidence": {
+        "yfinance": get_yfinance_earnings_evidence,
+        "alpha_vantage": get_alpha_vantage_earnings_evidence,
+        "a_stock": get_astock_earnings_evidence,
+    },
+    # earnings_commentary. Alpha Vantage only: it is the sole source here for an
+    # earnings-call transcript. Unconfigured, it raises VendorNotConfiguredError
+    # before any network call and the optional-category degradation applies.
+    "get_earnings_commentary": {
+        "alpha_vantage": get_alpha_vantage_earnings_commentary,
+    },
 }
 
 def get_category_for_method(method: str) -> str:

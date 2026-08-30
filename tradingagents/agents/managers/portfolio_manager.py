@@ -13,6 +13,7 @@ from __future__ import annotations
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
+    get_portfolio_block,
     get_language_instruction,
 )
 from tradingagents.agents.utils.structured import (
@@ -54,6 +55,28 @@ def create_portfolio_manager(llm):
             if past_context
             else ""
         )
+        # Placed in the final synthesis directly. By this point the signal has
+        # passed through a debate summary, a research plan, a trader proposal and
+        # a risk debate; anything that survives only by being quoted at each hop
+        # is gone. The instruction below is the load-bearing part: the one thing a
+        # final decision must not do is convert an admitted gap into a verdict.
+        portfolio_block = get_portfolio_block(
+            state, "**The holder's current portfolio and stated limits:**")
+        earnings_report = state.get("earnings_report", "")
+        earnings_block = (
+            "\n**Earnings & estimate-revision evidence:**\n"
+            f"{earnings_report}\n\n"
+            "Rules for using it. Every number and the momentum band were computed "
+            "from provider data — quote them as given, never recomputed or rounded. "
+            "A field marked unavailable and a band of Insufficient Data are "
+            "statements that the analyst coverage or vendor history does not exist; "
+            "they are not neutral readings and must not be resolved with an estimate, "
+            "an assumption, or prior knowledge of this company. If the decision rests "
+            "on earnings evidence that is absent or low-confidence, say so in the "
+            "rationale and let it reduce conviction rather than filling the hole.\n"
+            if earnings_report
+            else ""
+        )
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
@@ -72,6 +95,8 @@ def create_portfolio_manager(llm):
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
+{earnings_block}
+{portfolio_block}
 **Risk Analysts Debate History:**
 {history}
 

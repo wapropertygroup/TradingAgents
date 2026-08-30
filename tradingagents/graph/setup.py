@@ -10,6 +10,7 @@ from tradingagents.agents import (
     create_bear_researcher,
     create_bull_researcher,
     create_conservative_debator,
+    create_earnings_analyst,
     create_fundamentals_analyst,
     create_hot_money_tracker,
     create_lockup_watcher,
@@ -72,6 +73,7 @@ class GraphSetup:
                 - "social": Social media analyst
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
+                - "earnings": Earnings & estimate revision analyst (opt-in)
         """
         plan = build_analyst_execution_plan(selected_analysts)
 
@@ -80,6 +82,7 @@ class GraphSetup:
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+            "earnings": lambda: create_earnings_analyst(self.quick_thinking_llm),
             "policy": lambda: create_policy_analyst(self.quick_thinking_llm),
             "hot_money": lambda: create_hot_money_tracker(self.quick_thinking_llm),
             "lockup": lambda: create_lockup_watcher(self.quick_thinking_llm),

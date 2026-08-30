@@ -25,6 +25,40 @@ def create_research_manager(llm):
             "Hot money / capital-flow report: " + state.get("hot_money_report", ""),
             "Lock-up / insider-reduction report: " + state.get("lockup_report", ""),
         ])
+        # Read straight off the state rather than relying on the debate to have
+        # carried it. The debate summary is a lossy channel — a revision that
+        # neither researcher happened to quote would otherwise vanish before the
+        # decision, which is the same failure the A-share block above exists to
+        # prevent.
+        #
+        # Gated on presence, unlike the A-share block above, because earnings is
+        # opt-in and off by default: an unconditional block would print a heading
+        # with nothing under it plus a paragraph of instructions about a report
+        # that does not exist, on every default run. That both spends tokens and
+        # invites the model to comment on an absence.
+        earnings_report = state.get("earnings_report", "")
+        earnings_block = (
+            f"""**Earnings & estimate-revision evidence:**
+{earnings_report}
+
+When this report is present, reconcile it explicitly against your rating rather
+than mentioning it in passing. Address each of: which way consensus EPS has moved
+over 7, 30 and 90 days and for which fiscal period; how broad the analyst
+participation behind that move was, and whether the up and down counts agree with
+the trend; what management actually guided, as distinct from what analysts
+inferred; the recent surprise record and whether beats came against a rising or
+falling bar; and what post-earnings drift did. State where your rating disagrees
+with the revision direction and why — a Buy against broadly falling estimates
+needs a reason, and so does a Sell against broadly rising ones.
+
+The momentum band is computed, not argued: report it as given. A band of
+Insufficient Data, or a field marked unavailable, means the coverage or vendor
+history does not exist — it is not a neutral reading, and it must not be filled in
+from prior knowledge of the company.
+"""
+            if earnings_report
+            else ""
+        )
 
         investment_debate_state = state["investment_debate_state"]
 
@@ -55,6 +89,7 @@ Explicitly reconcile policy direction, speculative capital flow, and potential
 unlock/reduction supply shocks; do not let an omitted debate reference erase a
 specialist report.
 
+{earnings_block}
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction()
 
         investment_plan = invoke_structured_or_freetext(
