@@ -144,15 +144,144 @@ class TraderProposal(BaseModel):
         default=None,
         description="Optional stop-loss price in the instrument's quote currency.",
     )
+    target_price: float | None = Field(
+        default=None,
+        description=(
+            "Optional take-profit / price target in the instrument's quote "
+            "currency. Give this whenever a stop-loss is given: without it the "
+            "reward-to-risk ratio of the trade cannot be computed at all."
+        ),
+    )
+    position_size_pct: float | None = Field(
+        default=None,
+        description=(
+            "Optional position size as a PERCENTAGE of total portfolio value, "
+            "expressed 0-100 — write 5 for five percent, not 0.05. Omit it "
+            "entirely rather than guessing; an omitted size is treated as "
+            "unstated, whereas a wrong one is acted on."
+        ),
+    )
     position_sizing: str | None = Field(
         default=None,
-        description="Optional sizing guidance, e.g. '5% of portfolio'.",
+        description=(
+            "Optional sizing guidance in words, e.g. 'scale in over three "
+            "tranches'. Nuance that a single percentage cannot carry. Put the "
+            "number in position_size_pct, not here."
+        ),
     )
 
-    @field_validator("entry_price", "stop_loss", mode="before")
+    @field_validator("entry_price", "stop_loss", "target_price",
+                     "position_size_pct", mode="before")
     @classmethod
     def _nullish_float_to_none(cls, v):
         return _coerce_optional_float(v)
+
+    # NOTE: there is deliberately no cross-field validator here, and that is a
+    # correctness decision rather than an omission. ``invoke_structured_or_freetext``
+    # catches *any* structured failure and retries once as free text, so a
+    # validator that rejected an inconsistent proposal would not surface the
+    # inconsistency — it would discard the whole structured object and every
+    # number in it, leaving a downstream engine with nothing to check. Cross-field
+    # facts are therefore computed, not enforced: see :meth:`levels`.
+
+    def levels(self) -> dict[str, object]:
+        """The numeric facts of this proposal, plus what they imply. Pure Python.
+
+        This exists so a deterministic risk engine has structured numbers to
+        check. Everything a language model produced is passed through unchanged;
+        everything derived is arithmetic done here, because a reward-to-risk ratio
+        computed by the model is a plausible-looking number nobody can audit.
+
+        ``None`` means *unstated* throughout and never zero. A consumer must not
+        read a missing stop as "no risk" or a missing size as "no position".
+
+        ``flags`` names what is wrong rather than raising, and is empty when
+        nothing is. Each flag is a fact about the proposal, not an opinion:
+
+        ``size_ambiguous``
+            A size of 0 < pct <= 1. The field is documented as 0-100, but "0.05"
+            is a very plausible way for a model to write five percent, and the two
+            readings differ by 100x. Neither is assumed — silently rescaling would
+            risk a position a hundred times the intended one, and silently
+            accepting risks one a hundredth the size. The engine treats the size
+            as unverified.
+        ``size_out_of_range``
+            A size above 100%, which is not a percentage of a portfolio.
+        ``stop_not_below_entry`` / ``stop_not_above_entry``
+            A stop on the wrong side of the entry for the stated direction. For a
+            Buy the stop belongs below; for a Sell, above.
+        ``target_wrong_side``
+            A target that does not profit in the stated direction.
+        ``levels_without_direction``
+            Prices given on a Hold, where "entry" and "stop" have no side and so
+            no side can be checked.
+        """
+        action = self.action.value.lower()
+        entry, stop = self.entry_price, self.stop_loss
+        target, size = self.target_price, self.position_size_pct
+        flags: list[str] = []
+
+        if size is not None:
+            if 0 < size <= 1:
+                flags.append("size_ambiguous")
+            elif size > 100:
+                flags.append("size_out_of_range")
+
+        if entry is not None and stop is not None:
+            if action == "buy" and stop >= entry:
+                flags.append("stop_not_below_entry")
+            elif action == "sell" and stop <= entry:
+                flags.append("stop_not_above_entry")
+        if entry is not None and target is not None:
+            if action == "buy" and target <= entry:
+                flags.append("target_wrong_side")
+            elif action == "sell" and target >= entry:
+                flags.append("target_wrong_side")
+        if action == "hold" and any(v is not None for v in (entry, stop, target)):
+            flags.append("levels_without_direction")
+
+        # Reward-to-risk, only when all three levels exist and both legs are
+        # positive in the stated direction. A negative or zero risk leg means the
+        # stop is on the wrong side, already flagged above, and dividing by it
+        # would emit a number that reads as a real ratio.
+        reward_risk = None
+        if entry is not None and stop is not None and target is not None:
+            reward = target - entry if action == "buy" else entry - target
+            risk = entry - stop if action == "buy" else stop - entry
+            if risk > 0 and reward > 0:
+                reward_risk = round(reward / risk, 4)
+
+        return {
+            "action": self.action.value,
+            "entry_price": entry,
+            "stop_loss": stop,
+            "target_price": target,
+            "position_size_pct": size,
+            "position_sizing_text": self.position_sizing or None,
+            "reward_risk": reward_risk,
+            # True only when every level needed for a risk check is present. The
+            # engine reports an unchecked proposal rather than passing it.
+            "complete": entry is not None and stop is not None
+                        and target is not None and size is not None,
+            "flags": flags,
+        }
+
+
+#: Flags from ``TraderProposal.levels()`` in words, for the rendered markdown.
+#: Phrased as observations rather than instructions: the Portfolio Manager decides
+#: what to do about an inconsistent proposal, and a renderer that told it to
+#: discount the trade would be making that call from the wrong place.
+_FLAG_TEXT = {
+    "size_ambiguous": ("position size is ambiguous — written as a value at or "
+                       "below 1, which could mean either that many percent or "
+                       "one hundredth of it; treat the size as unstated"),
+    "size_out_of_range": "position size exceeds 100% of the portfolio",
+    "stop_not_below_entry": "stop-loss is not below the entry, on a Buy",
+    "stop_not_above_entry": "stop-loss is not above the entry, on a Sell",
+    "target_wrong_side": "price target does not profit in the stated direction",
+    "levels_without_direction": ("entry/stop/target given on a Hold, where they "
+                                 "have no side"),
+}
 
 
 def render_trader_proposal(proposal: TraderProposal) -> str:
@@ -171,8 +300,26 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         parts.extend(["", f"**Entry Price**: {proposal.entry_price}"])
     if proposal.stop_loss is not None:
         parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
+    if proposal.target_price is not None:
+        parts.extend(["", f"**Target Price**: {proposal.target_price}"])
+    if proposal.position_size_pct is not None:
+        parts.extend(["", f"**Position Size**: {proposal.position_size_pct}% of portfolio"])
     if proposal.position_sizing:
         parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
+    # Derived, not asked for. The ratio is arithmetic over the three levels above
+    # and is rendered so the reader and the Portfolio Manager see the same figure a
+    # risk engine will check, rather than each computing their own.
+    levels = proposal.levels()
+    if levels["reward_risk"] is not None:
+        parts.extend(["", f"**Reward:Risk**: {levels['reward_risk']}:1"])
+    # Said out loud, because the alternative is worse than silence. An
+    # inconsistent set of levels renders as perfectly plausible numbers -- a stop
+    # above the entry on a Buy looks like a price -- and the ratio simply goes
+    # missing, so a reader downstream has nothing to notice. Naming the problem is
+    # what makes it reviewable.
+    if levels["flags"]:
+        parts.extend(["", "**Level Warnings**: " + ", ".join(
+            _FLAG_TEXT.get(f, f) for f in levels["flags"])])
     parts.extend([
         "",
         f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",

@@ -73,6 +73,7 @@ class Propagator:
                     "count": 0,
                 }
             ),
+            "trader_levels": {},
             "market_report": "",
             "fundamentals_report": "",
             "earnings_report": "",

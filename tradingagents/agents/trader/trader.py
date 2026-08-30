@@ -15,7 +15,7 @@ from tradingagents.agents.utils.agent_utils import (
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
-    invoke_structured_or_freetext,
+    invoke_structured,
 )
 from tradingagents.dataflows.a_stock import is_a_share
 
@@ -82,7 +82,7 @@ def create_trader(llm):
             },
         ]
 
-        trader_plan = invoke_structured_or_freetext(
+        trader_plan, proposal = invoke_structured(
             structured_llm,
             llm,
             messages,
@@ -90,9 +90,17 @@ def create_trader(llm):
             "Trader",
         )
 
+        # The typed levels travel on the state as well as inside the rendered
+        # markdown, so a deterministic risk engine downstream reads numbers rather
+        # than regex-scraping prose. Empty on the free-text fallback path, where
+        # the numbers genuinely do not exist -- a consumer must read {} as
+        # "unstated" and not as zeros.
+        levels = proposal.levels() if proposal is not None else {}
+
         return {
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
+            "trader_levels": levels,
             "sender": name,
         }
 

@@ -56,6 +56,44 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
+def invoke_structured(
+    structured_llm: Any | None,
+    plain_llm: Any,
+    prompt: Any,
+    render: Callable[[T], str],
+    agent_name: str,
+) -> tuple[str, T | None]:
+    """Like :func:`invoke_structured_or_freetext`, but also returns the parsed object.
+
+    ``(markdown, parsed)``. ``parsed`` is ``None`` whenever the free-text path was
+    taken — an unsupported provider, a malformed response, a thinking model that
+    answered in prose. A caller that needs the typed fields must treat ``None`` as
+    *unstated* and not substitute defaults: the numbers genuinely do not exist on
+    that path, and inventing them is worse than reporting a proposal as unchecked.
+
+    Exists because the render-and-discard shape of the original loses every typed
+    field the moment it becomes markdown, and re-parsing markdown to recover them
+    is how a number that was structured becomes a number scraped by regex.
+    """
+    if structured_llm is not None:
+        try:
+            result = structured_llm.invoke(prompt)
+            if result is None:
+                # A thinking model can answer in plain text instead of calling
+                # the tool, leaving the parser with nothing to return. Treat it
+                # as a structured miss and fall back, with a clear reason.
+                raise ValueError("structured output returned no parsed result")
+            return render(result), result
+        except Exception as exc:
+            logger.warning(
+                "%s: structured-output invocation failed (%s); retrying once as free text",
+                agent_name, exc,
+            )
+
+    response = plain_llm.invoke(prompt)
+    return response.content, None
+
+
 def invoke_structured_or_freetext(
     structured_llm: Any | None,
     plain_llm: Any,
@@ -69,21 +107,10 @@ def invoke_structured_or_freetext(
     invocations, a list of message dicts for chat models that take that
     shape). The same value is forwarded to the free-text path so the
     fallback sees the same input the structured call did.
-    """
-    if structured_llm is not None:
-        try:
-            result = structured_llm.invoke(prompt)
-            if result is None:
-                # A thinking model can answer in plain text instead of calling
-                # the tool, leaving the parser with nothing to return. Treat it
-                # as a structured miss and fall back, with a clear reason.
-                raise ValueError("structured output returned no parsed result")
-            return render(result)
-        except Exception as exc:
-            logger.warning(
-                "%s: structured-output invocation failed (%s); retrying once as free text",
-                agent_name, exc,
-            )
 
-    response = plain_llm.invoke(prompt)
-    return response.content
+    Thin wrapper over :func:`invoke_structured` for the agents that need only the
+    markdown, so there is one implementation of the fallback rather than two that
+    can drift apart in their error handling.
+    """
+    return invoke_structured(structured_llm, plain_llm, prompt, render,
+                             agent_name)[0]
