@@ -83,6 +83,7 @@ class TradingAgentsGraph:
         callbacks: list | None = None,
         progress_callback=None,
         portfolio_context: str = "",
+        portfolio_data: dict[str, Any] | None = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -172,6 +173,10 @@ class TradingAgentsGraph:
         # run after every analyst, so a resumed run picks it up on the turn that
         # uses it.
         self.portfolio_context = portfolio_context or ""
+        # The size ladder the deterministic gate checks against. Kept
+        # beside the prose block because they come from one computation on
+        # the caller's side and must describe the same portfolio.
+        self.portfolio_data = dict(portfolio_data or {})
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
@@ -491,6 +496,7 @@ class TradingAgentsGraph:
             past_context=past_context,
             instrument_context=instrument_context,
             portfolio_context=self.portfolio_context,
+            portfolio_data=self.portfolio_data,
         )
         args = self.propagator.get_graph_args()
 

@@ -234,6 +234,22 @@ _PORTFOLIO_RULES = (
 )
 
 
+def get_risk_gate_block(state: Mapping[str, Any]) -> str:
+    """The deterministic risk-gate ruling as text, or "" before the gate has run.
+
+    Rendered by :mod:`tradingagents.risk_engine`, not here, so the four prompts
+    that carry it cannot phrase the same ruling four ways. Empty means the node has
+    not executed yet -- which is the normal state for every agent upstream of it --
+    and must not be read as approval.
+    """
+    from tradingagents import risk_engine
+
+    decision = state.get("risk_gate")
+    if not isinstance(decision, Mapping) or not decision:
+        return ""
+    return risk_engine.render(decision)
+
+
 def get_portfolio_block(state: Mapping[str, Any], heading: str) -> str:
     """The holdings block wrapped in its heading and rules, or "" when absent.
 

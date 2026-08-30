@@ -2,6 +2,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_portfolio_block,
+    get_risk_gate_block,
 )
 
 
@@ -28,6 +29,7 @@ def create_neutral_debator(llm):
 
         portfolio_block = get_portfolio_block(
             state, "The holder's current portfolio and stated limits:")
+        risk_gate_block = get_risk_gate_block(state)
 
         prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
 
@@ -45,6 +47,7 @@ Hot Money / Capital Flow Report: {hot_money_report}
 Lock-up / Insider Reduction Report: {lockup_report}
 Earnings & Estimate Revision Report: {earnings_report}
 {portfolio_block}
+{risk_gate_block}
 Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
 Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()

@@ -14,6 +14,7 @@ from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_portfolio_block,
+    get_risk_gate_block,
     get_language_instruction,
 )
 from tradingagents.agents.utils.structured import (
@@ -62,6 +63,7 @@ def create_portfolio_manager(llm):
         # final decision must not do is convert an admitted gap into a verdict.
         portfolio_block = get_portfolio_block(
             state, "**The holder's current portfolio and stated limits:**")
+        risk_gate_block = get_risk_gate_block(state)
         earnings_report = state.get("earnings_report", "")
         earnings_block = (
             "\n**Earnings & estimate-revision evidence:**\n"
@@ -97,6 +99,7 @@ def create_portfolio_manager(llm):
 {lessons_line}
 {earnings_block}
 {portfolio_block}
+{risk_gate_block}
 **Risk Analysts Debate History:**
 {history}
 

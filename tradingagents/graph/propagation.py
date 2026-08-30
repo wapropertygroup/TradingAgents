@@ -23,6 +23,7 @@ class Propagator:
         past_context: str = "",
         instrument_context: str = "",
         portfolio_context: str = "",
+        portfolio_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -49,6 +50,8 @@ class Propagator:
             "trade_date": str(trade_date),
             "past_context": past_context,
             "portfolio_context": portfolio_context,
+            "portfolio_data": dict(portfolio_data or {}),
+            "risk_gate": {},
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",

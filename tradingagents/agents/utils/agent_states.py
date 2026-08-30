@@ -79,4 +79,6 @@ class AgentState(MessagesState):
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
+    risk_gate: Annotated[dict, "Deterministic risk-gate ruling on the Trader's proposal (pass/clamped/blocked, approved size, reasons). Empty until the gate node runs; not_evaluated when no portfolio was supplied."]
+    portfolio_data: Annotated[dict, "Caller-supplied size ladder the gate checks against; empty when the caller has no portfolio."]
     portfolio_context: Annotated[str, "Caller-supplied holdings and limit verdicts injected at run start; empty when the caller has no portfolio"]
