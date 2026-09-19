@@ -88,8 +88,11 @@ class SignalToolThrottleTests(unittest.TestCase):
                 self.assertIsInstance(result, str)
                 self.assertIn("DATA_UNAVAILABLE", result)
                 # The analyst must be told not to invent numbers in place of the
-                # data it could not read.
-                self.assertIn("do not fabricate", result.lower())
+                # data it could not read. Matched on the verb alone: upstream's
+                # all-vendors-unavailable sentinel says "do not estimate or
+                # fabricate values", which is the same instruction worded more
+                # strongly than the phrase this used to pin.
+                self.assertIn("fabricate", result.lower())
 
     def test_throttle_is_never_reported_as_a_missing_vendor(self):
         """The exact production regression, pinned by its message."""

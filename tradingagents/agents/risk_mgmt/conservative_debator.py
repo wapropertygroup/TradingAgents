@@ -5,6 +5,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_portfolio_block,
     get_relative_strength_block,
     get_risk_gate_block,
+    opponent_argument_or_opening,
+    report_or_absent,
 )
 
 
@@ -14,19 +16,27 @@ def create_conservative_debator(llm):
         history = risk_debate_state.get("history", "")
         conservative_history = risk_debate_state.get("conservative_history", "")
 
-        current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
-        current_neutral_response = risk_debate_state.get("current_neutral_response", "")
+        current_aggressive_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_aggressive_response", ""), "aggressive analyst"
+        )
+        current_neutral_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_neutral_response", ""), "neutral analyst"
+        )
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        quality_report = state["quality_report"]
-        valuation_report = state["valuation_report"]
-        policy_report = state.get("policy_report", "")
-        hot_money_report = state.get("hot_money_report", "")
-        lockup_report = state.get("lockup_report", "")
-        earnings_report = state.get("earnings_report", "")
+        market_research_report = report_or_absent(state["market_report"], "market")
+        sentiment_report = report_or_absent(state["sentiment_report"], "sentiment")
+        news_report = report_or_absent(state["news_report"], "news")
+        fundamentals_report = report_or_absent(
+            state["fundamentals_report"], "fundamentals")
+        quality_report = report_or_absent(state.get("quality_report", ""), "business-quality")
+        valuation_report = report_or_absent(state.get("valuation_report", ""), "valuation")
+        policy_report = report_or_absent(state.get("policy_report", ""), "policy")
+        hot_money_report = report_or_absent(
+            state.get("hot_money_report", ""), "hot-money / capital-flow")
+        lockup_report = report_or_absent(
+            state.get("lockup_report", ""), "lock-up / insider-reduction")
+        earnings_report = report_or_absent(
+            state.get("earnings_report", ""), "earnings & estimate-revision")
         instrument_context = get_instrument_context_from_state(state)
 
         trader_decision = state["trader_investment_plan"]

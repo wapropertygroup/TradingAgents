@@ -43,6 +43,11 @@ from .alpha_vantage_earnings import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .sec_edgar import (
+    get_balance_sheet as get_sec_edgar_balance_sheet,
+    get_cashflow as get_sec_edgar_cashflow,
+    get_income_statement as get_sec_edgar_income_statement,
+)
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -150,6 +155,7 @@ TOOLS_CATEGORIES = {
 
 VENDOR_LIST = [
     "yfinance",
+    "sec_edgar",
     "fred",
     "polymarket",
     "alpha_vantage",
@@ -189,6 +195,16 @@ OPTIONAL_CATEGORIES = {
     "macro_data", "prediction_markets", "signal_data", "earnings_commentary",
 }
 
+#: Categories where an all-vendors-unavailable chain must raise rather than
+#: degrade to a sentinel.
+#:
+#: Prices are quoted as fact by every downstream agent and the verification
+#: snapshot is built from them, so a calm "data unavailable" there hides a broken
+#: primary vendor behind a run that looks like it merely lacked one input. A
+#: fundamentals, news or sentiment gap is survivable and the run should continue
+#: without it, which is what upstream's degrade-don't-crash rule is for.
+LOUD_ON_UNAVAILABLE = {"core_stock_apis"}
+
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
     # core_stock_apis
@@ -211,16 +227,19 @@ VENDOR_METHODS = {
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
+        "sec_edgar": get_sec_edgar_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "a_stock": get_astock_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
+        "sec_edgar": get_sec_edgar_cashflow,
         "yfinance": get_yfinance_cashflow,
         "a_stock": get_astock_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
+        "sec_edgar": get_sec_edgar_income_statement,
         "yfinance": get_yfinance_income_statement,
         "a_stock": get_astock_income_statement,
     },
@@ -349,13 +368,21 @@ def route_to_vendor(method: str, *args, **kwargs):
         try:
             return impl_func(*args, **kwargs)
         except VendorRateLimitError as e:
-            logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            # Upstream's wording: naming the exception in the log is what tells a
+            # throttle apart from an outage.
+            logger.warning("Vendor %r unavailable for %s: %s; trying next vendor.",
+                           vendor, method, e)
             # Recorded rather than dropped. A multi-vendor chain moves on and this
             # never mattered, but a single-vendor category (signal_data) has
             # nothing to move on to, so the tail below was left with no error at
             # all and reported "No available vendor for 'get_fund_flow'" -- which
             # names a registration bug that did not exist and hides the throttle
             # that did.
+            #
+            # Folded into first_error rather than returned as a sentinel outright,
+            # which is what upstream does here: the optional/required split below
+            # has to keep applying, because degrading a throttled *core* category
+            # to a sentinel would hide a broken primary behind a calm message.
             if last_rate_limit is None:
                 last_rate_limit = e
             continue
@@ -375,6 +402,32 @@ def route_to_vendor(method: str, *args, **kwargs):
             if first_error is None:
                 first_error = e
             continue
+
+    # Every vendor was throttled or unreachable: that is a fact about the
+    # vendors, not about the instrument, and outside the categories above it must
+    # not end the run.
+    #
+    # Ahead of the no-data verdict below, which is the precedence upstream
+    # introduced and this fork needs more than upstream does. `a_stock` sits in
+    # every chain here and refuses a non-A-share code by string inspection, so a
+    # throttled Yahoo plus that refusal used to answer a US ticker with
+    # "NO_DATA_AVAILABLE ... the symbol may be invalid, delisted, or not covered
+    # (not an A-share code)" — a confident claim about the instrument assembled
+    # out of one vendor declining the venue and the vendor that covers it never
+    # being heard from. A vendor we could not reach may well have had the data,
+    # so "unavailable" is the weaker and therefore truer answer.
+    if last_rate_limit is not None:
+        if category not in LOUD_ON_UNAVAILABLE:
+            logger.warning("All vendors unavailable for %s: %s", method, last_rate_limit)
+            return (
+                f"DATA_UNAVAILABLE: no configured vendor could serve {method} right now "
+                f"({last_rate_limit}). This says nothing about the instrument; report the "
+                f"data as unavailable and do not estimate or fabricate values."
+            )
+        # A throttled vendor is a real failure with a nameable cause, so fold it
+        # into first_error and let the block below raise it.
+        if first_error is None:
+            first_error = last_rate_limit
 
     # If any vendor reported "no data", the symbol is genuinely unavailable.
     # Return one explicit, instructive sentinel rather than a vendor-specific

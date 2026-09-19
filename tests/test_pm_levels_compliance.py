@@ -119,10 +119,13 @@ def test_renderer_emits_the_numbers():
     assert "**Stop Loss**: 95.0" in text
 
 
-def test_renderer_omits_what_was_not_stated():
+def test_renderer_names_what_was_not_stated():
+    # Same rule as the Trader's renderer: named even when absent, so "no target"
+    # and "target not reported" do not read alike.
     text = render_pm_decision(_dec())
-    for absent in ("Position Size", "Entry Price", "Stop Loss", "Price Target"):
-        assert absent not in text, absent
+    for named in ("Position Size", "Entry Price", "Stop Loss", "Price Target",
+                  "Time Horizon"):
+        assert f"**{named}**: not provided" in text, named
 
 
 def test_renderer_keeps_the_headers_downstream_parsers_read():
