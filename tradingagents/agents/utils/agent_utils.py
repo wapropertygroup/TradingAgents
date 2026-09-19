@@ -78,6 +78,8 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+from tradingagents.dataflows.utils import get_current_date  # noqa: E402
+
 
 def get_language_instruction() -> str:
     """Return a prompt instruction for the configured output language.
@@ -93,6 +95,20 @@ def get_language_instruction() -> str:
     if lang.strip().lower() == "english":
         return ""
     return f" Write your entire response in {lang}."
+
+
+def opponent_argument_or_opening(text: str, opponent: str) -> str:
+    """Opponent's latest argument, or an explicit opening marker when empty.
+
+    The first speaker in each debate round receives an empty opponent response;
+    interpolating it into a "refute the opponent" prompt makes the model
+    fabricate the other side's position. Returning a clear "has not spoken yet"
+    marker instead lets it open with its own case (#1176).
+    """
+    text = (text or "").strip()
+    if text:
+        return text
+    return f"(The {opponent} has not spoken yet — open the debate with your own case.)"
 
 
 def _clean_identity_value(value: Any) -> str | None:
@@ -153,6 +169,7 @@ def build_instrument_context(
     ticker: str,
     asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
+    curr_date: str | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
 
@@ -160,6 +177,11 @@ def build_instrument_context(
     :func:`resolve_instrument_identity`), the company name and business
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
+
+    That profile carries no historical vintage: it describes the company today.
+    For a run dated earlier, the context says so, since a company that has since
+    renamed or been reclassified would otherwise anchor the whole graph to an
+    identity it did not have on the analysis date.
     """
     is_crypto = asset_type == "crypto"
     instrument_label = "asset" if is_crypto else "instrument"
@@ -190,6 +212,13 @@ def build_instrument_context(
             "Do not substitute a different company or ticker unless a tool "
             "result explicitly disproves this resolved identity."
         )
+        today = get_current_date()
+        if curr_date and str(curr_date) < today:
+            context += (
+                f" This identity is how the vendor describes the instrument today "
+                f"({today}), not necessarily on {curr_date}: a name or "
+                f"classification changed since then would read as the current one."
+            )
 
     if is_crypto:
         context += (
@@ -343,6 +372,20 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
         str(state["company_of_interest"]),
         state.get("asset_type", "stock"),
     )
+
+
+def report_or_absent(text: str, source: str) -> str:
+    """An analyst's report, or a marker saying it was never produced.
+
+    A report is empty when its analyst was not selected, refused, or returned
+    nothing. Interpolating that into a labelled section presents an absence as a
+    blank finding, and the reading agent fills it in from nothing, the same way
+    an empty opponent argument used to invite an invented rebuttal (#1176).
+    """
+    text = (text or "").strip()
+    if text:
+        return text
+    return f"(No {source} report in this run: it is not available, not an empty finding.)"
 
 
 def create_msg_delete():

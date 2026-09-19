@@ -46,8 +46,13 @@ def _load_ohlcv_for(symbol: str, curr_date: str) -> pd.DataFrame:
     to check would manufacture a discrepancy on every A-share run.
     """
     if a_stock.is_a_share(symbol):
+        # No ``fill_gaps`` knob on this one, and none needed: it returns the
+        # vendor's own kline rows, so a non-trading day is simply absent rather
+        # than carried forward.
         return a_stock.load_ohlcv(symbol, curr_date)
-    return load_ohlcv(symbol, curr_date)
+    # As reported: this snapshot is quoted by the agents as exact prices, so a
+    # gap-filled cell would put the previous session's number under this date.
+    return load_ohlcv(symbol, curr_date, fill_gaps=False)
 
 
 def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:

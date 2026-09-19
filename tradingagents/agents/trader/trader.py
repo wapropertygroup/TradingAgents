@@ -40,6 +40,22 @@ def create_trader(llm):
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
         market_constraints = _A_SHARE_CONSTRAINTS if is_a_share(company_name) else ""
+        # The research plan digests the debate but loses exact price structure;
+        # give the Trader the technical market report so entry/stop levels are
+        # grounded in real ATR / support-resistance / current price (#1167). The
+        # report is empty when the user did not select the market analyst, so
+        # only offer it (and the grounding instruction) when it has content.
+        market_report = (state["market_report"] or "").strip()
+        if market_report:
+            grounding = (
+                "Ground concrete price levels (entry, stop-loss, position sizing) in the technical "
+                "market report's price structure -- current price, support/resistance, ATR, and "
+                "volatility -- and use the research plan for direction and strategy. "
+            )
+            report_section = f"Technical Market Report:\n{market_report}\n\n"
+        else:
+            grounding = ""
+            report_section = ""
         # Included directly, not left to the Research Manager's plan to relay.
         # The plan is a summary, and estimate revision direction is exactly the
         # kind of dated, countable detail a summary drops first.
@@ -91,6 +107,14 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan. "
+                    + grounding
+                    # Entry/stop are numeric price fields. Asking for concrete
+                    # levels invites a percentage ("15%"), which is not a price
+                    # and fails the structured parse (#1288).
+                    + "State entry price and stop-loss as absolute price levels in the "
+                    "instrument's quote currency (for example 189.5), never a percentage "
+                    "or a range; convert a percentage distance to the price level it "
+                    "implies, or omit the field if you cannot state a number. "
                     + market_constraints
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
@@ -103,14 +127,25 @@ def create_trader(llm):
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n"
+                    f"trading decision.\n\n"
+                    f"{report_section}"
+                    f"Proposed Investment Plan: {investment_plan}\n"
                     f"{earnings_block}\n"
                     f"{quality_block}\n"
                     f"{valuation_block}\n"
                     f"{portfolio_block}\n"
                     f"{market_block}\n"
                     f"{relative_strength_block}\n"
-                    f"Leverage these insights to make an informed and strategic decision."
+                    f"Leverage these insights to make an informed and strategic decision.\n\n"
+                    "## Output\n\n"
+                    "Write these sections, in this order, starting with the action "
+                    "on its own line:\n\n"
+                    "- **Action**: exactly one of Buy / Hold / Sell. A research "
+                    "recommendation of Overweight is a Buy and Underweight is a Sell, "
+                    "sized by how strong the case is; conflict alone is not a Hold.\n"
+                    "- **Reasoning**: why, against the plan and the price structure\n"
+                    "- **Entry Price**, **Stop Loss**, **Target Price**, **Position Size**, "
+                    "**Position Sizing**: when you can state them"
                 ),
             },
         ]

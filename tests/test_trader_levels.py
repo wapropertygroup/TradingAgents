@@ -203,11 +203,17 @@ def test_renderer_shows_the_new_numbers_and_the_derived_ratio():
     assert "**Reward:Risk**: 3.0:1" in text
 
 
-def test_renderer_omits_what_was_not_stated():
+def test_renderer_names_what_was_not_stated():
+    # Upstream's rule (#v0.5.0), applied to this fork's wider set of levels: an
+    # omitted line reads as a field nobody asked for, so a reader cannot tell it
+    # from a level the trader declined to set.
     text = render_trader_proposal(_prop())
-    for absent in ("Target Price", "Position Size", "Reward:Risk", "Entry Price",
-                   "Stop Loss"):
-        assert absent not in text, absent
+    for named in ("Target Price", "Position Size", "Entry Price", "Stop Loss",
+                  "Position Sizing"):
+        assert f"**{named}**: not provided" in text, named
+    # Derived, not reported: absent because its inputs were, which the lines
+    # above already say.
+    assert "Reward:Risk" not in text
 
 
 def test_renderer_keeps_the_legacy_grep_line():

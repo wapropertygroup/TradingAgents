@@ -141,13 +141,18 @@ def test_graph_constructor_accepts_and_stores_the_context():
     assert sig.parameters["portfolio_context"].default == ""
 
 
-def test_run_signature_ignores_the_portfolio():
+def test_run_signature_ignores_the_injected_block():
     # A portfolio moves daily. Folding it into the checkpoint key would turn every
     # resume of the same ticker into a cold start.
+    #
+    # Narrowed to the injected block: upstream keys the signature on a
+    # caller-supplied Portfolio *object* instead, which is a per-run argument and
+    # is `none` for this fork's caller, so it cannot cause that cold start.
     source = (_REPO / "tradingagents/graph/trading_graph.py").read_text(encoding="utf-8")
     start = source.index("def _run_signature")
     body = source[start:source.index("def ", start + 10)]
-    assert "portfolio" not in body
+    assert "portfolio_context" not in body
+    assert "self.portfolio" not in body
 
 
 # ---------------------------------------------------------------------------

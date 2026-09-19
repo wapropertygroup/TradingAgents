@@ -1,6 +1,8 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    opponent_argument_or_opening,
+    report_or_absent,
 )
 
 
@@ -10,17 +12,22 @@ def create_bear_researcher(llm):
         history = investment_debate_state.get("history", "")
         bear_history = investment_debate_state.get("bear_history", "")
 
-        current_response = investment_debate_state.get("current_response", "")
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        quality_report = state["quality_report"]
-        valuation_report = state["valuation_report"]
-        fundamentals_report = state.get("fundamentals_report", "")
-        policy_report = state.get("policy_report", "")
-        hot_money_report = state.get("hot_money_report", "")
-        lockup_report = state.get("lockup_report", "")
-        earnings_report = state.get("earnings_report", "")
+        current_response = opponent_argument_or_opening(
+            investment_debate_state.get("current_response", ""), "bull analyst"
+        )
+        market_research_report = report_or_absent(state["market_report"], "market")
+        sentiment_report = report_or_absent(state["sentiment_report"], "sentiment")
+        news_report = report_or_absent(state["news_report"], "news")
+        quality_report = report_or_absent(state.get("quality_report", ""), "business-quality")
+        valuation_report = report_or_absent(state.get("valuation_report", ""), "valuation")
+        fundamentals_report = report_or_absent(state.get("fundamentals_report", ""), "fundamentals")
+        policy_report = report_or_absent(state.get("policy_report", ""), "policy")
+        hot_money_report = report_or_absent(
+            state.get("hot_money_report", ""), "hot-money / capital-flow")
+        lockup_report = report_or_absent(
+            state.get("lockup_report", ""), "lock-up / insider-reduction")
+        earnings_report = report_or_absent(
+            state.get("earnings_report", ""), "earnings & estimate-revision")
         instrument_context = get_instrument_context_from_state(state)
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
