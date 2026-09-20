@@ -998,6 +998,11 @@ class TestLegacyRemoval:
         mock_graph._run_graph = functools.partial(
             TradingAgentsGraph._run_graph, mock_graph
         )
+        # Upstream moved the memory write behind record_decision, so it has to be
+        # bound too or _run_graph calls an auto-MagicMock and writes nothing.
+        mock_graph.record_decision = functools.partial(
+            TradingAgentsGraph.record_decision, mock_graph
+        )
 
         TradingAgentsGraph.propagate(mock_graph, "NVDA", "2026-01-10")
 
@@ -1032,6 +1037,11 @@ class TestLegacyRemoval:
         mock_graph.signal_processor.process_signal.return_value = "Buy"
         mock_graph._run_graph = functools.partial(
             TradingAgentsGraph._run_graph, mock_graph
+        )
+        # Upstream moved the memory write behind record_decision, so it has to be
+        # bound too or _run_graph calls an auto-MagicMock and writes nothing.
+        mock_graph.record_decision = functools.partial(
+            TradingAgentsGraph.record_decision, mock_graph
         )
 
         TradingAgentsGraph.propagate(mock_graph, "NVDA", "2026-01-10")

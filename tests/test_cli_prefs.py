@@ -94,11 +94,37 @@ def test_a_region_specific_provider_survives():
     assert kept["llm_provider"] == "qwen-cn"
 
 
+#: Every env var that makes this fork skip one of the prompts these tests stub.
+#: A developer .env commonly pins several, at which point the flow never reaches
+#: the stub and records the pinned value instead of the answer. Cleared because
+#: these tests are about the interactive flow; test_cli_env_skip.py is where the
+#: pinned path is exercised.
+_PROMPT_SKIPPING_ENV = (
+    "TRADINGAGENTS_OUTPUT_LANGUAGE",
+    "TRADINGAGENTS_MAX_DEBATE_ROUNDS",
+    "TRADINGAGENTS_MAX_RISK_ROUNDS",
+    "TRADINGAGENTS_LLM_PROVIDER",
+    "TRADINGAGENTS_LLM_BACKEND_URL",
+    "TRADINGAGENTS_QUICK_THINK_LLM",
+    "TRADINGAGENTS_DEEP_THINK_LLM",
+    "TRADINGAGENTS_GOOGLE_THINKING_LEVEL",
+    "TRADINGAGENTS_OPENAI_REASONING_EFFORT",
+    "TRADINGAGENTS_ANTHROPIC_EFFORT",
+)
+
+
+def _clear_env_pins(monkeypatch):
+    for var in _PROMPT_SKIPPING_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+
 # --- wiring ------------------------------------------------------------------
 
 def _answer_every_prompt(monkeypatch):
     """Drive the real selection flow, answering each prompt with a fixed value."""
     import cli.main as m
+
+    _clear_env_pins(monkeypatch)
 
     monkeypatch.setattr(m, "fetch_announcements", lambda: [])
     monkeypatch.setattr(m, "display_announcements", lambda *a: None)
@@ -149,6 +175,7 @@ def test_a_remembered_endpoint_is_offered_back(monkeypatch):
     remembered and validated, then never read."""
     import cli.main as m
 
+    _clear_env_pins(monkeypatch)
     save_last_run({"llm_provider": "openai_compatible", "backend_url": "http://localhost:1234/v1"})
     offered = {}
     monkeypatch.setattr(m, "select_llm_provider", lambda default=None: ("openai_compatible", None))
