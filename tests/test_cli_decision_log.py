@@ -20,6 +20,13 @@ def _bare_graph(tmp_path):
     graph = object.__new__(TradingAgentsGraph)
     graph.config = {"memory_log_path": str(tmp_path / "trading_memory.md")}
     graph.memory_log = TradingMemoryLog(graph.config)
+    # This fork's caller-supplied context, normally set in __init__, which
+    # object.__new__ skips. Empty is the real default: ystocker fills these in,
+    # nothing else does.
+    graph.portfolio_context = ""
+    graph.portfolio_data = {}
+    graph.market_context = ""
+    graph.relative_strength_context = ""
     return graph
 
 

@@ -133,7 +133,7 @@ class TestAShareRouting:
         seen = []
         monkeypatch.setattr(
             validator, "load_ohlcv",
-            lambda s, d: (seen.append(s), _sample_ohlcv())[1],
+            lambda s, d, fill_gaps=True: (seen.append(s), _sample_ohlcv())[1],
         )
         monkeypatch.setattr(validator.a_stock, "load_ohlcv", _explode)
 
@@ -157,6 +157,7 @@ class TestAShareRouting:
         assert expected in snap
 
     def test_no_basis_line_for_symbols_without_provenance(self, monkeypatch):
-        monkeypatch.setattr(validator, "load_ohlcv", lambda s, d: _sample_ohlcv())
+        monkeypatch.setattr(validator, "load_ohlcv",
+                            lambda s, d, fill_gaps=True: _sample_ohlcv())
         snap = validator.build_verified_market_snapshot("COF", "2026-05-20")
         assert "复权" not in snap
