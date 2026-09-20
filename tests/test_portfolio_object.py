@@ -89,6 +89,16 @@ def _bare_graph(tmp_path):
     graph._resolve_pending_entries = lambda t: None
     graph.resolve_instrument_context = lambda t, a="stock", d=None: ""
     graph._memory_as_of = lambda d: None
+    # This fork's caller-supplied context, normally set in __init__, which
+    # object.__new__ skips. Empty is the real default: ystocker fills these in,
+    # nothing else does.
+    graph.portfolio_context = ""
+    graph.portfolio_data = {}
+    graph.market_context = ""
+    graph.relative_strength_context = ""
+    # Likewise: _run_graph streams when either of these is set.
+    graph.progress_callback = None
+    graph.debug = False
     return graph
 
 

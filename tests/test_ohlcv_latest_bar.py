@@ -194,7 +194,8 @@ def test_the_snapshot_does_not_present_a_filled_price_as_reported(monkeypatch, t
     monkeypatch.setattr(su.pd.Timestamp, "today", staticmethod(lambda: today))
     cache = tmp_path / "AAPL-YFin-data.csv"
     cache.write_text(frame.to_csv(index=False))
-    os.utime(cache, (today.timestamp(), today.timestamp()))
+    stamp = today.to_pydatetime().timestamp()   # local, as _cache_is_fresh reads it
+    os.utime(cache, (stamp, stamp))
     monkeypatch.setattr(su.yf, "download", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("should read the seeded cache")))
 
