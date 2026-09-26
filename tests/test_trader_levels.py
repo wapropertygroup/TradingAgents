@@ -25,7 +25,7 @@ from tradingagents.agents.schemas import (
     TraderProposal,
     render_trader_proposal,
 )
-from tradingagents.agents.utils.structured import (
+from tradingagents.agents.structured import (
     invoke_structured,
     invoke_structured_or_freetext,
 )
@@ -331,7 +331,7 @@ def test_trader_node_reports_empty_levels_on_the_free_text_path():
 
 
 def test_state_declares_the_field_and_it_starts_empty():
-    from tradingagents.agents.utils.agent_states import AgentState
+    from tradingagents.agents.state import AgentState
     from tradingagents.graph.propagation import Propagator
 
     assert "trader_levels" in AgentState.__annotations__

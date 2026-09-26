@@ -1,7 +1,7 @@
 import unittest
 
 from cli.models import AnalystType, AssetType
-from cli.utils import detect_asset_type, filter_analysts_for_asset_type
+from cli.prompts import detect_asset_type, filter_analysts_for_asset_type
 from tradingagents.graph.propagation import Propagator
 
 
@@ -48,12 +48,12 @@ class CryptoAssetModeTests(unittest.TestCase):
         )
 
     def test_earnings_is_selectable_for_stocks_in_the_cli_order(self):
-        from cli.utils import ANALYST_ORDER
+        from cli.prompts import ANALYST_CHOICES
 
-        labels = dict(ANALYST_ORDER)
+        labels = dict(ANALYST_CHOICES)
         self.assertIn(AnalystType.EARNINGS, labels.values())
         self.assertIn("Earnings", next(
-            label for label, key in ANALYST_ORDER if key == AnalystType.EARNINGS
+            label for label, key in ANALYST_CHOICES if key == AnalystType.EARNINGS
         ))
 
     def test_propagator_includes_asset_type_in_initial_state(self):

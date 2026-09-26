@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import patch
 
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface as I
+from tradingagents.dataflows import router as I
 from tradingagents.dataflows.a_stock import NoMarketDataError, VendorRateLimitError
 from tradingagents.dataflows.config import set_config
 

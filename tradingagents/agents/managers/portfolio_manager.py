@@ -10,8 +10,7 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
-from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import (
     get_instrument_context_from_state,
     get_market_context_block,
     get_portfolio_block,
@@ -19,7 +18,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_risk_gate_block,
     get_language_instruction,
 )
-from tradingagents.agents.utils.structured import (
+from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
+from tradingagents.agents.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured,

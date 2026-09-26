@@ -368,7 +368,7 @@ def test_the_free_text_path_yields_empty_levels_and_unverifiable():
 
 
 def test_state_declares_both_fields_and_they_start_empty():
-    from tradingagents.agents.utils.agent_states import AgentState
+    from tradingagents.agents.state import AgentState
     from tradingagents.graph.propagation import Propagator
 
     for field in ("pm_levels", "gate_compliance"):

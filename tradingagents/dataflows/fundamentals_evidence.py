@@ -42,7 +42,7 @@ import yfinance as yf
 from .errors import NoMarketDataError
 from .evidence_values import EPSILON, safe_float
 from .quality_models import QualityEvidence, Value, finalize_evidence as finalize_quality
-from .symbol_utils import normalize_symbol
+from .symbols import normalize_symbol
 from .valuation_models import ValuationEvidence, finalize_evidence as finalize_valuation
 
 logger = logging.getLogger(__name__)

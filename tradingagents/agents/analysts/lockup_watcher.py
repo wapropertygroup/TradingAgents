@@ -2,16 +2,12 @@
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_utils import (
-    get_fundamentals,
-    get_insider_transactions,
-    get_instrument_context_from_state,
-    get_language_instruction,
-    get_lockup_expiry,
-    get_news,
-)
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.signal_data_tools import get_lockup_expiry
+from tradingagents.agents.tools import get_fundamentals, get_insider_transactions, get_news
 
-LOCKUP_TOOLS = (get_insider_transactions, get_news, get_fundamentals, get_lockup_expiry)
+# The tools this analyst is offered; its tool node is built from the same tuple.
+TOOLS = (get_insider_transactions, get_news, get_fundamentals, get_lockup_expiry)
 
 
 def create_lockup_watcher(llm):
@@ -21,7 +17,7 @@ def create_lockup_watcher(llm):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
         # The first three tools are the user-approved minimum contract.
-        tools = list(LOCKUP_TOOLS)
+        tools = list(TOOLS)
         system_message = (
             "You are the Lock-up Monitor for a mainland China A-share. Assess "
             "restricted-share unlock schedules, unlock size versus float, holder "

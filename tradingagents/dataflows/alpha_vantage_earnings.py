@@ -2,7 +2,7 @@
 
 Opt-in: this vendor is only reached when a user names it in the earnings chain
 *and* ``ALPHA_VANTAGE_API_KEY`` is set. With no key it raises
-:class:`~.alpha_vantage_common.AlphaVantageNotConfiguredError` before any
+:class:`~.vendors.alpha_vantage.common.AlphaVantageNotConfiguredError` before any
 network call, so an unconfigured install pays nothing and the router moves on.
 
 It exists for two things yfinance cannot do.
@@ -48,11 +48,6 @@ from datetime import date, datetime, timezone
 from io import StringIO
 from typing import Any
 
-from .alpha_vantage_common import (
-    AlphaVantageRateLimitError,
-    _make_api_request,
-    get_api_key,
-)
 from .earnings_models import (
     DriftObservation,
     EarningsCalendar,
@@ -69,7 +64,12 @@ from .earnings_models import (
     safe_int,
 )
 from .errors import NoMarketDataError
-from .symbol_utils import normalize_symbol
+from .symbols import normalize_symbol
+from .vendors.alpha_vantage.common import (
+    AlphaVantageRateLimitError,
+    _make_api_request,
+    get_api_key,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -1,10 +1,7 @@
 import unittest
 
 from tradingagents.graph.analyst_execution import (
-    AnalystWallTimeTracker,
     build_analyst_execution_plan,
-    get_initial_analyst_node,
-    sync_analyst_tracker_from_chunk,
 )
 
 
@@ -20,14 +17,6 @@ class AnalystExecutionPlanTests(unittest.TestCase):
     def test_rejects_unknown_analyst_keys(self):
         with self.assertRaises(ValueError):
             build_analyst_execution_plan(["market", "macro"])
-
-    def test_get_initial_analyst_node_uses_plan_metadata(self):
-        plan = build_analyst_execution_plan(["fundamentals", "news"])
-
-        self.assertEqual(
-            get_initial_analyst_node(plan),
-            "Fundamentals Analyst",
-        )
 
     def test_social_key_displays_as_sentiment_analyst(self):
         # The wire key stays "social" for saved-config back-compat, but the
@@ -52,10 +41,9 @@ class AnalystExecutionPlanTests(unittest.TestCase):
     def test_earnings_spec_strings_are_stable(self):
         """These strings are graph node names and a state key.
 
-        The tool and clear node names are matched exactly by
-        ``ConditionalLogic.should_continue_earnings``, and ``report_key`` is what
-        every downstream consumer reads, so a rename here silently detaches the
-        analyst from its own routing.
+        ``report_key`` is what every downstream consumer reads, and the node names
+        are what a checkpointed run resumes into, so a rename here silently
+        detaches the analyst from its readers or from a saved run.
         """
         spec = build_analyst_execution_plan(["earnings"]).specs[0]
         self.assertEqual(spec.key, "earnings")
@@ -84,51 +72,23 @@ class AnalystExecutionPlanTests(unittest.TestCase):
         node_names = [spec.agent_node for spec in ANALYST_NODE_SPECS.values()]
         self.assertEqual(len(node_names), len(set(node_names)), node_names)
 
-
-class AnalystWallTimeTrackerTests(unittest.TestCase):
-    def test_records_wall_time_when_analyst_completes(self):
-        plan = build_analyst_execution_plan(["market", "news"])
-        tracker = AnalystWallTimeTracker(plan)
-
-        tracker.mark_started("market", started_at=10.0)
-        tracker.mark_completed("market", completed_at=13.5)
-
-        self.assertEqual(tracker.get_wall_times(), {"market": 3.5})
-
-    def test_formats_summary_in_plan_order(self):
-        plan = build_analyst_execution_plan(["news", "market"])
-        tracker = AnalystWallTimeTracker(plan)
-
-        tracker.mark_started("market", started_at=20.0)
-        tracker.mark_completed("market", completed_at=22.25)
-        tracker.mark_started("news", started_at=10.0)
-        tracker.mark_completed("news", completed_at=14.0)
-
-        self.assertEqual(
-            tracker.format_summary(),
-            "Analyst wall time: News 4.00s | Market 2.25s",
+    def test_code_driven_analysts_have_a_tool_node_for_every_call_they_emit(self):
+        """The earnings, quality and valuation analysts emit their tool calls by
+        name, from code, without binding tools to a model. Their tool node is
+        built from the same ``TOOLS`` tuple, so a name the node does not hold
+        would come back as a tool error and be reported as missing evidence."""
+        from tradingagents.agents.analysts import (
+            earnings_analyst,
+            quality_analyst,
+            valuation_analyst,
         )
 
-    def test_syncs_wall_time_from_sequential_chunks(self):
-        plan = build_analyst_execution_plan(["market", "news"])
-        tracker = AnalystWallTimeTracker(plan)
-
-        sync_analyst_tracker_from_chunk(tracker, {}, now=10.0)
-        self.assertEqual(tracker.get_wall_times(), {})
-
-        sync_analyst_tracker_from_chunk(
-            tracker,
-            {"market_report": "done"},
-            now=13.0,
-        )
-        self.assertEqual(tracker.get_wall_times(), {"market": 3.0})
-
-        sync_analyst_tracker_from_chunk(
-            tracker,
-            {"market_report": "done", "news_report": "done"},
-            now=18.0,
-        )
-        self.assertEqual(
-            tracker.get_wall_times(),
-            {"market": 3.0, "news": 5.0},
-        )
+        emitted = {
+            "earnings": {earnings_analyst.EVIDENCE_TOOL, earnings_analyst.COMMENTARY_TOOL},
+            "quality": {quality_analyst.EVIDENCE_TOOL},
+            "valuation": {valuation_analyst.EVIDENCE_TOOL},
+        }
+        for key, names in emitted.items():
+            with self.subTest(analyst=key):
+                spec = build_analyst_execution_plan([key]).specs[0]
+                self.assertEqual({tool.name for tool in spec.tools}, names)

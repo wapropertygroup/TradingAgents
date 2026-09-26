@@ -12,11 +12,11 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from tradingagents.dataflows import alpha_vantage_earnings as av
-from tradingagents.dataflows.alpha_vantage_common import (
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.vendors.alpha_vantage.common import (
     AlphaVantageNotConfiguredError,
     AlphaVantageRateLimitError,
 )
-from tradingagents.dataflows.errors import NoMarketDataError
 
 EARNINGS_PAYLOAD = {
     "symbol": "IBM",

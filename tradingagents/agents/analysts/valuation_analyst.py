@@ -14,12 +14,10 @@ import logging
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.fundamentals_evidence_tools import get_valuation_evidence
 from tradingagents.agents.schemas import ValuationNarrative, render_valuation_narrative
-from tradingagents.agents.utils.agent_utils import (
-    get_instrument_context_from_state,
-    get_language_instruction,
-)
-from tradingagents.agents.utils.structured import (
+from tradingagents.agents.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
@@ -32,6 +30,10 @@ from tradingagents.dataflows.valuation_models import (
 logger = logging.getLogger(__name__)
 
 EVIDENCE_TOOL = "get_valuation_evidence"
+
+# The tools this analyst's first pass calls; its tool node is built from the same
+# tuple. Called by code, not offered to the model, so none is bound to the LLM.
+TOOLS = (get_valuation_evidence,)
 
 _TERMINAL_STATUSES = {"unsupported", "no_coverage"}
 

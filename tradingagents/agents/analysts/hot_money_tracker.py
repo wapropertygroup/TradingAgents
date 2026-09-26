@@ -2,21 +2,19 @@
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.signal_data_tools import (
     get_concept_blocks,
     get_dragon_tiger_board,
     get_fund_flow,
     get_hot_stocks,
     get_industry_comparison,
-    get_insider_transactions,
-    get_instrument_context_from_state,
-    get_language_instruction,
-    get_news,
     get_northbound_flow,
-    get_stock_data,
 )
+from tradingagents.agents.tools import get_insider_transactions, get_news, get_stock_data
 
-HOT_MONEY_TOOLS = (
+# The tools this analyst is offered; its tool node is built from the same tuple.
+TOOLS = (
     get_stock_data, get_news, get_insider_transactions, get_hot_stocks,
     get_northbound_flow, get_concept_blocks, get_fund_flow,
     get_dragon_tiger_board, get_industry_comparison,
@@ -30,7 +28,7 @@ def create_hot_money_tracker(llm):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
         # The first three tools are the user-approved minimum contract.
-        tools = list(HOT_MONEY_TOOLS)
+        tools = list(TOOLS)
         system_message = (
             "You are the Hot Money Tracker for a mainland China A-share. Track "
             "Dragon-Tiger List seats, large-order and main-capital flow, abnormal "

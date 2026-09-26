@@ -2,14 +2,11 @@
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.utils.agent_utils import (
-    get_global_news,
-    get_instrument_context_from_state,
-    get_language_instruction,
-    get_news,
-)
+from tradingagents.agents.context import get_instrument_context_from_state, get_language_instruction
+from tradingagents.agents.tools import get_global_news, get_news
 
-POLICY_TOOLS = (get_news, get_global_news)
+# The tools this analyst is offered; its tool node is built from the same tuple.
+TOOLS = (get_news, get_global_news)
 
 
 def create_policy_analyst(llm):
@@ -18,7 +15,7 @@ def create_policy_analyst(llm):
     def policy_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
-        tools = list(POLICY_TOOLS)
+        tools = list(TOOLS)
         system_message = (
             "You are the Policy Analyst for a mainland China A-share. Analyze "
             "monetary and fiscal policy, CSRC and other regulatory actions, "

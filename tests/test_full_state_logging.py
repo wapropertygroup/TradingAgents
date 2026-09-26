@@ -57,8 +57,6 @@ class FullStateLoggingTests(unittest.TestCase):
         # Build the object without touching LLM providers or the network.
         self.graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
         self.graph.config = {"results_dir": str(self.results_dir)}
-        self.graph.log_states_dict = {}
-        self.graph.ticker = "AAPL"
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -122,9 +120,9 @@ class FullStateLoggingTests(unittest.TestCase):
         self.assertEqual(logged["policy_report"], "政策收紧，估值承压")
 
     def test_a_ticker_that_would_escape_the_results_directory_is_rejected(self):
-        self.graph.ticker = "../../etc/passwd"
+        # The directory is named from the run's own state, not from the graph.
         with self.assertRaises(ValueError):
-            self.graph._log_state("2026-08-30", _final_state())
+            self.graph._log_state("2026-08-30", _final_state(company_of_interest="../../etc/passwd"))
 
 
 class ReportTreeParityTests(unittest.TestCase):
@@ -153,6 +151,16 @@ class ReportTreeParityTests(unittest.TestCase):
             self.assertNotIn("### Earnings Analyst", path.read_text(encoding="utf-8"))
 
 
+def _built_workflow(selected):
+    """The uncompiled graph GraphSetup builds, with stand-in models."""
+    from unittest.mock import MagicMock
+
+    from tradingagents.graph.conditional_logic import ConditionalLogic
+    from tradingagents.graph.setup import GraphSetup
+
+    return GraphSetup(MagicMock(), MagicMock(), ConditionalLogic()).setup_graph(tuple(selected))
+
+
 class ToolNodeRegistrationTests(unittest.TestCase):
     def test_the_earnings_tool_node_can_execute_both_tools_the_analyst_calls(self):
         """The analyst calls both deterministically; an unregistered tool fails.
@@ -165,20 +173,23 @@ class ToolNodeRegistrationTests(unittest.TestCase):
             EVIDENCE_TOOL,
         )
 
-        graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
-        nodes = graph._create_tool_nodes()
-        self.assertIn("earnings", nodes)
-        registered = {tool.name for tool in nodes["earnings"].tools_by_name.values()}
-        self.assertEqual(registered, {EVIDENCE_TOOL, COMMENTARY_TOOL})
+        node = _built_workflow(["earnings"]).nodes["tools_earnings"].runnable
+        self.assertEqual(set(node.tools_by_name), {EVIDENCE_TOOL, COMMENTARY_TOOL})
 
-    def test_every_analyst_spec_has_a_matching_tool_node(self):
+    def test_every_analyst_with_tools_gets_a_tool_node_holding_exactly_them(self):
+        """The tool node is built from the analyst's own TOOLS, so the model is
+        never offered a tool its node cannot run. An analyst with no tools (the
+        sentiment analyst fetches its sources itself) gets no tool node at all."""
         from tradingagents.graph.analyst_execution import ANALYST_NODE_SPECS
 
-        graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
-        nodes = graph._create_tool_nodes()
-        for key in ANALYST_NODE_SPECS:
+        workflow = _built_workflow(ANALYST_NODE_SPECS)
+        for key, spec in ANALYST_NODE_SPECS.items():
             with self.subTest(analyst=key):
-                self.assertIn(key, nodes)
+                if not spec.tools:
+                    self.assertIsNone(spec.tool_node)
+                    continue
+                node = workflow.nodes[spec.tool_node].runnable
+                self.assertEqual(set(node.tools_by_name), {t.name for t in spec.tools})
 
 
 class CheckpointSignatureTests(unittest.TestCase):

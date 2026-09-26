@@ -13,9 +13,9 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface
+from tradingagents.dataflows import router
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.symbol_utils import NoMarketDataError
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _reset_config():
@@ -50,7 +50,7 @@ class VendorRoutingTests(unittest.TestCase):
 
     def _route(self, vendors_for_get_stock_data):
         return mock.patch.dict(
-            interface.VENDOR_METHODS,
+            router.VENDOR_METHODS,
             {"get_stock_data": vendors_for_get_stock_data},
             clear=False,
         )
@@ -60,7 +60,7 @@ class VendorRoutingTests(unittest.TestCase):
         set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
         av = mock.Mock(side_effect=_returns("AV_DATA"))
         with self._route({"yfinance": _no_data, "alpha_vantage": av}):
-            result = interface.route_to_vendor("get_stock_data", "FAKE", "2026-01-01", "2026-01-10")
+            result = router.route_to_vendor("get_stock_data", "FAKE", "2026-01-01", "2026-01-10")
         self.assertIn("NO_DATA_AVAILABLE", result)
         av.assert_not_called()  # the unchosen vendor was never tried
 
@@ -68,7 +68,7 @@ class VendorRoutingTests(unittest.TestCase):
         # Listing both vendors opts in to ordered fallback.
         set_config({"data_vendors": {"core_stock_apis": "yfinance,alpha_vantage"}})
         with self._route({"yfinance": _no_data, "alpha_vantage": _returns("AV_DATA")}):
-            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            result = router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(result, "AV_DATA")
 
     def test_primary_error_is_logged_not_masked(self):
@@ -76,8 +76,8 @@ class VendorRoutingTests(unittest.TestCase):
         # must be visible in logs (broken primary not hidden).
         set_config({"data_vendors": {"core_stock_apis": "yfinance,alpha_vantage"}})
         with self._route({"yfinance": _raises(ValueError("boom")), "alpha_vantage": _no_data}), \
-                self.assertLogs("tradingagents.dataflows.interface", level="WARNING") as cm:
-            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+                self.assertLogs("tradingagents.dataflows.router", level="WARNING") as cm:
+            result = router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertIn("NO_DATA_AVAILABLE", result)
         joined = "\n".join(cm.output)
         self.assertIn("boom", joined)            # the real error surfaced in logs
@@ -86,18 +86,18 @@ class VendorRoutingTests(unittest.TestCase):
     def test_unknown_configured_vendor_raises(self):
         set_config({"data_vendors": {"core_stock_apis": "bogus_vendor"}})
         with self.assertRaises(ValueError) as ctx:
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertIn("bogus_vendor", str(ctx.exception))
 
     def test_default_sentinel_uses_all_vendors(self):
         # No explicit choice ("default") keeps the resilient full-chain behavior.
         set_config({"data_vendors": {"core_stock_apis": "default"}})
         with self._route({"yfinance": _no_data, "alpha_vantage": _returns("AV_DATA")}):
-            result = interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            result = router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertEqual(result, "AV_DATA")
 
     def _route_method(self, method, vendors):
-        return mock.patch.dict(interface.VENDOR_METHODS, {method: vendors}, clear=False)
+        return mock.patch.dict(router.VENDOR_METHODS, {method: vendors}, clear=False)
 
     def test_optional_category_degrades_instead_of_raising(self):
         # An optional enrichment vendor (FRED macro) that raises must NOT abort
@@ -106,7 +106,7 @@ class VendorRoutingTests(unittest.TestCase):
         with self._route_method(
             "get_macro_indicators", {"fred": _raises(ValueError("FRED 400: bad series"))}
         ):
-            result = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-01-01")
+            result = router.route_to_vendor("get_macro_indicators", "cpi", "2026-01-01")
         self.assertIn("DATA_UNAVAILABLE", result)
         self.assertIn("macro_data", result)
 
@@ -116,7 +116,7 @@ class VendorRoutingTests(unittest.TestCase):
         set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
         with self._route({"yfinance": _raises(ValueError("boom"))}), \
                 self.assertRaises(ValueError):
-            interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+            router.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
 
 
 @pytest.mark.unit
@@ -130,14 +130,14 @@ class EarningsRoutingTests(unittest.TestCase):
         _reset_config()
 
     def _route_method(self, method, vendors):
-        return mock.patch.dict(interface.VENDOR_METHODS, {method: vendors}, clear=False)
+        return mock.patch.dict(router.VENDOR_METHODS, {method: vendors}, clear=False)
 
     def test_both_categories_are_registered(self):
         self.assertEqual(
-            interface.get_category_for_method("get_earnings_evidence"), "earnings_data"
+            router.get_category_for_method("get_earnings_evidence"), "earnings_data"
         )
         self.assertEqual(
-            interface.get_category_for_method("get_earnings_commentary"),
+            router.get_category_for_method("get_earnings_commentary"),
             "earnings_commentary",
         )
 
@@ -153,7 +153,7 @@ class EarningsRoutingTests(unittest.TestCase):
 
     def test_alpha_vantage_is_registered_but_not_in_the_default_chain(self):
         """Opt-in: no run may acquire an API-key dependency without being asked."""
-        self.assertIn("alpha_vantage", interface.VENDOR_METHODS["get_earnings_evidence"])
+        self.assertIn("alpha_vantage", router.VENDOR_METHODS["get_earnings_evidence"])
         self.assertNotIn(
             "alpha_vantage", default_config.DEFAULT_CONFIG["data_vendors"]["earnings_data"]
         )
@@ -165,7 +165,7 @@ class EarningsRoutingTests(unittest.TestCase):
             "yfinance": _returns("YF_JSON"),
             "a_stock": _no_data,
         }):
-            result = interface.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30")
+            result = router.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30")
         self.assertIn("NO_DATA_AVAILABLE", result)
         self.assertNotIn("YF_JSON", result)
 
@@ -175,7 +175,7 @@ class EarningsRoutingTests(unittest.TestCase):
             "yfinance": _no_data,
             "a_stock": _returns("THS_JSON"),
         }):
-            result = interface.route_to_vendor("get_earnings_evidence", "600519", "2026-08-30")
+            result = router.route_to_vendor("get_earnings_evidence", "600519", "2026-08-30")
         self.assertEqual(result, "THS_JSON")
 
     def test_an_exhausted_chain_returns_one_instructive_sentinel(self):
@@ -184,7 +184,7 @@ class EarningsRoutingTests(unittest.TestCase):
             "yfinance": _no_data,
             "a_stock": _no_data,
         }):
-            result = interface.route_to_vendor("get_earnings_evidence", "ZZZZ", "2026-08-30")
+            result = router.route_to_vendor("get_earnings_evidence", "ZZZZ", "2026-08-30")
         self.assertIn("NO_DATA_AVAILABLE", result)
         self.assertIn("Do not estimate or fabricate", result)
 
@@ -194,12 +194,12 @@ class EarningsRoutingTests(unittest.TestCase):
         The routine "no earnings" and "no vintage" outcomes never reach here —
         the adapters return those as structured evidence with an explicit status.
         """
-        self.assertNotIn("earnings_data", interface.OPTIONAL_CATEGORIES)
+        self.assertNotIn("earnings_data", router.OPTIONAL_CATEGORIES)
         set_config({"data_vendors": {"earnings_data": "yfinance"}})
         with self._route_method(
             "get_earnings_evidence", {"yfinance": _raises(ValueError("yahoo exploded"))}
         ), self.assertRaises(ValueError):
-            interface.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30")
+            router.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30")
 
     def test_earnings_commentary_is_optional_and_degrades_to_a_sentinel(self):
         """Its only vendor is premium-gated, so exhaustion is the common case.
@@ -207,13 +207,13 @@ class EarningsRoutingTests(unittest.TestCase):
         A missing transcript must not abort a report whose numeric evidence is
         already in hand.
         """
-        self.assertIn("earnings_commentary", interface.OPTIONAL_CATEGORIES)
+        self.assertIn("earnings_commentary", router.OPTIONAL_CATEGORIES)
         set_config({"data_vendors": {"earnings_commentary": "alpha_vantage"}})
         with self._route_method(
             "get_earnings_commentary",
-            {"alpha_vantage": _raises(interface.VendorNotConfiguredError("no key"))},
+            {"alpha_vantage": _raises(router.VendorNotConfiguredError("no key"))},
         ):
-            result = interface.route_to_vendor("get_earnings_commentary", "AAPL", "2026-08-30")
+            result = router.route_to_vendor("get_earnings_commentary", "AAPL", "2026-08-30")
         self.assertIn("DATA_UNAVAILABLE", result)
         self.assertIn("earnings_commentary", result)
         self.assertIn("do not fabricate", result)
@@ -223,11 +223,11 @@ class EarningsRoutingTests(unittest.TestCase):
 
         def record(symbol, *a, **k):
             calls.append(symbol)
-            raise interface.VendorNotConfiguredError("ALPHA_VANTAGE_API_KEY is not set")
+            raise router.VendorNotConfiguredError("ALPHA_VANTAGE_API_KEY is not set")
 
         set_config({"data_vendors": {"earnings_commentary": "alpha_vantage"}})
         with self._route_method("get_earnings_commentary", {"alpha_vantage": record}):
-            interface.route_to_vendor("get_earnings_commentary", "AAPL", "2026-08-30")
+            router.route_to_vendor("get_earnings_commentary", "AAPL", "2026-08-30")
         # The vendor is entered once and refuses before reaching the network; the
         # assertion here is that the router does not retry or reach elsewhere.
         self.assertEqual(len(calls), 1)
@@ -242,7 +242,7 @@ class EarningsRoutingTests(unittest.TestCase):
             "alpha_vantage": _returns("AV"),
         }):
             self.assertEqual(
-                interface.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30"),
+                router.route_to_vendor("get_earnings_evidence", "AAPL", "2026-08-30"),
                 "AV",
             )
 

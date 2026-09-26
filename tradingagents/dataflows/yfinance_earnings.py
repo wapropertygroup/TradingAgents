@@ -79,7 +79,7 @@ from .earnings_models import (
     safe_int,
 )
 from .errors import NoMarketDataError
-from .symbol_utils import normalize_symbol
+from .symbols import normalize_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +240,7 @@ def _unsupported_by_symbol_form(canonical: str) -> str | None:
 
 
 def _fetch_live(symbol: str, canonical: str, as_of: str) -> EarningsEvidence:
-    from .stockstats_utils import yf_retry
+    from .vendors.yahoo.ohlcv import yf_retry
 
     ticker = yf.Ticker(canonical)
     info = _safe_info(ticker)
@@ -747,7 +747,7 @@ def _adjusted_closes(symbol: str, as_of: str) -> pd.DataFrame:
     network call once the market analyst has run, and cannot see a price the
     requested date could not.
     """
-    from .stockstats_utils import load_ohlcv
+    from .vendors.yahoo.ohlcv import load_ohlcv
 
     frame = load_ohlcv(symbol, as_of)
     if frame is None or frame.empty or "Close" not in frame.columns:

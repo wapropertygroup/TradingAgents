@@ -21,7 +21,7 @@ import pathlib
 
 import pytest
 
-from tradingagents.agents.utils.agent_utils import (
+from tradingagents.agents.context import (
     get_portfolio_block,
     get_portfolio_context_from_state,
 )
@@ -202,7 +202,7 @@ def test_only_the_declared_decision_agents_reference_it():
     hits = []
     for path in (_REPO / "tradingagents/agents").rglob("*.py"):
         rel = str(path.relative_to(_REPO))
-        if rel.endswith("utils/agent_utils.py"):
+        if rel.endswith("agents/context.py"):
             continue        # where the helper lives
         if "get_portfolio_block" in path.read_text(encoding="utf-8"):
             hits.append(rel)

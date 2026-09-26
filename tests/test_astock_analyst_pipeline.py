@@ -2,9 +2,9 @@
 
 import unittest
 
-from tradingagents.agents.analysts.hot_money_tracker import HOT_MONEY_TOOLS
-from tradingagents.agents.analysts.lockup_watcher import LOCKUP_TOOLS
-from tradingagents.agents.analysts.policy_analyst import POLICY_TOOLS
+from tradingagents.agents.analysts.hot_money_tracker import TOOLS as HOT_MONEY_TOOLS
+from tradingagents.agents.analysts.lockup_watcher import TOOLS as LOCKUP_TOOLS
+from tradingagents.agents.analysts.policy_analyst import TOOLS as POLICY_TOOLS
 from tradingagents.graph.propagation import Propagator
 
 
@@ -52,7 +52,7 @@ class AStockAnalystPipelineTests(unittest.TestCase):
             COMMENTARY_TOOL,
             EVIDENCE_TOOL,
         )
-        from tradingagents.agents.utils.earnings_data_tools import (
+        from tradingagents.agents.earnings_data_tools import (
             get_earnings_commentary,
             get_earnings_evidence,
         )
