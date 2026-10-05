@@ -42,6 +42,7 @@ from tradingagents.dataflows.quality_models import (
     QualityEvidence,
     render_quality_report,
 )
+from tradingagents.report_language import for_language
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +151,14 @@ def _parse_evidence(
     raw: str | None, ticker: str, trade_date: str
 ) -> tuple[QualityEvidence, str | None]:
     """Rehydrate the evidence, or synthesize an honest failure record."""
+    L = for_language()
     if raw is None:
         return (
             QualityEvidence.no_coverage(
                 ticker, trade_date,
-                "The quality evidence tool returned nothing for this run, so no "
-                "fundamentals figures are available.",
+                L("The quality evidence tool returned nothing for this run, so no "
+                  "fundamentals figures are available.",
+                  "本次运行中质量证据工具没有返回任何内容，因此没有可用的基本面数据。"),
             ),
             None,
         )
@@ -167,11 +170,13 @@ def _parse_evidence(
         return (
             QualityEvidence.no_coverage(
                 ticker, trade_date,
-                "The fundamentals data provider did not return structured evidence "
-                "for this symbol. Its verbatim response is reproduced below; treat "
-                "it as the reason, and do not supply figures from any other source.",
+                L("The fundamentals data provider did not return structured evidence "
+                  "for this symbol. Its verbatim response is reproduced below; treat "
+                  "it as the reason, and do not supply figures from any other source.",
+                  "基本面数据源没有为该代码返回结构化证据。其原始响应附在下方；请以此为原因，"
+                  "不要用任何其他来源的数字替代。"),
             ),
-            f"## Provider Response\n\n```\n{text[:2000]}\n```",
+            L("## Provider Response", "## 数据源原始响应") + f"\n\n```\n{text[:2000]}\n```",
         )
 
     try:
@@ -181,8 +186,9 @@ def _parse_evidence(
         return (
             QualityEvidence.no_coverage(
                 ticker, trade_date,
-                f"The quality evidence payload did not match the expected schema "
-                f"({exc}). No figures are reported.",
+                L(f"The quality evidence payload did not match the expected schema "
+                  f"({exc}). No figures are reported.",
+                  f"质量证据数据与预期结构不符（{exc}）。不报告任何数字。"),
             ),
             None,
         )
@@ -207,8 +213,10 @@ def _synthesis_prompt(
     an assistant turn with a tool call plus its JSON result, which the
     finished numeric report below already restates in readable form.
     """
-    gaps = "\n".join(f"- {gap}" for gap in evidence.data_gaps) or "- none recorded"
-    warnings = "\n".join(f"- {w}" for w in evidence.warnings) or "- none recorded"
+    L = for_language()
+    none = L("- none recorded", "- 无")
+    gaps = "\n".join(f"- {L.message(gap)}" for gap in evidence.data_gaps) or none
+    warnings = "\n".join(f"- {L.message(w)}" for w in evidence.warnings) or none
 
     system = f"""You are a business-quality analyst. A complete, already-\
 finished numeric report for {ticker} as of {trade_date} is supplied below. \
@@ -225,7 +233,7 @@ moat_assessment, red_flags, and a confidence rating.
 percentage and the quality tier are already published in the report below and \
 are appended verbatim ahead of your text. If you disagree with a value, say so \
 in your reasoning; do not print a competing number.
-2. **The quality tier is `{evidence.tier.tier}` and is final.** It was computed \
+2. **The quality tier is `{L.term(evidence.tier.tier)}` and is final.** It was computed \
 from a weighted mean of the available signals. You may explain it or note that \
 it rests on thin coverage. You may not upgrade, downgrade, or re-label it.
 3. **Never fill a gap by inference.** Fields marked unavailable are absent from \

@@ -52,6 +52,7 @@ from tradingagents.dataflows.earnings_models import (
     EarningsEvidence,
     render_evidence_report,
 )
+from tradingagents.report_language import for_language
 
 logger = logging.getLogger(__name__)
 
@@ -189,12 +190,14 @@ def _parse_evidence(
     verbatim so the reason survives into the report rather than being flattened
     to "unavailable".
     """
+    L = for_language()
     if raw is None:
         return (
             EarningsEvidence.no_coverage(
                 ticker, trade_date,
-                "The earnings evidence tool returned nothing for this run, so no "
-                "estimate, revision or surprise figures are available.",
+                L("The earnings evidence tool returned nothing for this run, so no "
+                  "estimate, revision or surprise figures are available.",
+                  "本次运行中盈利证据工具没有返回任何内容，因此没有可用的预期、修正或惊喜数据。"),
             ),
             None,
         )
@@ -206,11 +209,13 @@ def _parse_evidence(
         return (
             EarningsEvidence.no_coverage(
                 ticker, trade_date,
-                "The earnings data provider did not return structured evidence for "
-                "this symbol. Its verbatim response is reproduced below; treat it as "
-                "the reason, and do not supply figures from any other source.",
+                L("The earnings data provider did not return structured evidence for "
+                  "this symbol. Its verbatim response is reproduced below; treat it as "
+                  "the reason, and do not supply figures from any other source.",
+                  "盈利数据源没有为该代码返回结构化证据。其原始响应附在下方；请以此为原因，"
+                  "不要用任何其他来源的数字替代。"),
             ),
-            f"## Provider Response\n\n```\n{text[:2000]}\n```",
+            L("## Provider Response", "## 数据源原始响应") + f"\n\n```\n{text[:2000]}\n```",
         )
 
     try:
@@ -220,8 +225,9 @@ def _parse_evidence(
         return (
             EarningsEvidence.no_coverage(
                 ticker, trade_date,
-                f"The earnings evidence payload did not match the expected schema "
-                f"({exc}). No figures are reported.",
+                L(f"The earnings evidence payload did not match the expected schema "
+                  f"({exc}). No figures are reported.",
+                  f"盈利证据数据与预期结构不符（{exc}）。不报告任何数字。"),
             ),
             None,
         )
@@ -286,8 +292,12 @@ def _synthesis_prompt(
         )
     )
 
-    gaps = "\n".join(f"- {gap}" for gap in evidence.data_gaps) or "- none recorded"
-    warnings = "\n".join(f"- {w}" for w in evidence.warnings) or "- none recorded"
+    # In the report's language, as the numeric report above them is, so the
+    # model restates them in that language instead of quoting English into it.
+    L = for_language()
+    none = L("- none recorded", "- 无")
+    gaps = "\n".join(f"- {L.message(gap)}" for gap in evidence.data_gaps) or none
+    warnings = "\n".join(f"- {L.message(w)}" for w in evidence.warnings) or none
 
     system = f"""You are an earnings and estimate-revision analyst. A complete, \
 already-finished numeric report for {ticker} as of {trade_date} is supplied below. \
@@ -304,7 +314,7 @@ guidance_and_commentary, catalysts, risks, and data_gaps, plus a confidence rati
 percentage, count, date and the momentum band are already published in the report \
 below and are appended verbatim ahead of your text. If you disagree with a value, \
 say so in data_gaps in words; do not print a competing number.
-2. **The momentum band is `{evidence.momentum.band}` and is final.** It was computed \
+2. **The momentum band is `{L.term(evidence.momentum.band)}` and is final.** It was computed \
 from a weighted mean of the available revision signals. You may explain it or note \
 that it rests on thin coverage. You may not upgrade, downgrade, or re-label it.
 3. **Never fill a gap by inference.** Fields marked unavailable are absent from the \

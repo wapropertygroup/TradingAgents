@@ -31,7 +31,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tradingagents.report_language import ReportText
 
 #: Below this, a denominator is treated as indistinguishable from zero.
 EPSILON = 1e-9
@@ -256,3 +259,25 @@ def _fmt_large(number: float, currency: str | None) -> str:
     else:
         text = f"{number:,.0f}"
     return f"{text} {currency}" if currency else text
+
+
+def render_sources_section(sources: list[str], gaps: list[str], warnings: list[str],
+                           L: ReportText) -> str:
+    """The "Sources & Data Gaps" section all three evidence reports end with."""
+    listed = L.join(L.source(s) for s in sources) if sources else L("none recorded", "未记录")
+    lines = [
+        L("## Sources & Data Gaps", "## 数据来源与缺口"),
+        "",
+        L(f"**Sources:** {listed}", f"**数据来源：** {listed}"),
+        "",
+    ]
+    if gaps:
+        lines.append(L("**Data gaps (measured absences, not zeros):**",
+                       "**数据缺口（实测缺失，并非零值）：**"))
+        lines += [f"- {L.message(g)}" for g in gaps]
+    else:
+        lines.append(L("**Data gaps:** none.", "**数据缺口：** 无。"))
+    if warnings:
+        lines += ["", L("**Warnings:**", "**警示：**")]
+        lines += [f"- {L.message(w)}" for w in warnings]
+    return "\n".join(lines)

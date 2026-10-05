@@ -26,6 +26,7 @@ from tradingagents.dataflows.valuation_models import (
     ValuationEvidence,
     render_valuation_report,
 )
+from tradingagents.report_language import for_language
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +107,14 @@ def _tool_result(messages) -> str | None:
 def _parse_evidence(
     raw: str | None, ticker: str, trade_date: str
 ) -> tuple[ValuationEvidence, str | None]:
+    L = for_language()
     if raw is None:
         return (
             ValuationEvidence.no_coverage(
                 ticker, trade_date,
-                "The valuation evidence tool returned nothing for this run, so no "
-                "multiples are available.",
+                L("The valuation evidence tool returned nothing for this run, so no "
+                  "multiples are available.",
+                  "本次运行中估值证据工具没有返回任何内容，因此没有可用的估值倍数。"),
             ),
             None,
         )
@@ -123,11 +126,13 @@ def _parse_evidence(
         return (
             ValuationEvidence.no_coverage(
                 ticker, trade_date,
-                "The fundamentals data provider did not return structured evidence "
-                "for this symbol. Its verbatim response is reproduced below; treat "
-                "it as the reason, and do not supply figures from any other source.",
+                L("The fundamentals data provider did not return structured evidence "
+                  "for this symbol. Its verbatim response is reproduced below; treat "
+                  "it as the reason, and do not supply figures from any other source.",
+                  "基本面数据源没有为该代码返回结构化证据。其原始响应附在下方；请以此为原因，"
+                  "不要用任何其他来源的数字替代。"),
             ),
-            f"## Provider Response\n\n```\n{text[:2000]}\n```",
+            L("## Provider Response", "## 数据源原始响应") + f"\n\n```\n{text[:2000]}\n```",
         )
 
     try:
@@ -137,8 +142,9 @@ def _parse_evidence(
         return (
             ValuationEvidence.no_coverage(
                 ticker, trade_date,
-                f"The valuation evidence payload did not match the expected schema "
-                f"({exc}). No figures are reported.",
+                L(f"The valuation evidence payload did not match the expected schema "
+                  f"({exc}). No figures are reported.",
+                  f"估值证据数据与预期结构不符（{exc}）。不报告任何数字。"),
             ),
             None,
         )
@@ -152,8 +158,10 @@ def _synthesis_prompt(
     numeric_report: str,
     evidence: ValuationEvidence,
 ) -> list:
-    gaps = "\n".join(f"- {gap}" for gap in evidence.data_gaps) or "- none recorded"
-    warnings = "\n".join(f"- {w}" for w in evidence.warnings) or "- none recorded"
+    L = for_language()
+    none = L("- none recorded", "- 无")
+    gaps = "\n".join(f"- {L.message(gap)}" for gap in evidence.data_gaps) or none
+    warnings = "\n".join(f"- {L.message(w)}" for w in evidence.warnings) or none
 
     system = f"""You are a valuation analyst. A complete, already-finished \
 numeric report for {ticker} as of {trade_date} is supplied below. It was \
@@ -169,7 +177,7 @@ thesis, catalysts_for_rerating, and a confidence rating.
 1. **Do not restate, recompute, round, or correct any number.** Every multiple \
 and the valuation tier are already published in the report below and are \
 appended verbatim ahead of your text.
-2. **The valuation tier is `{evidence.tier.tier}` and is final.** It was \
+2. **The valuation tier is `{L.term(evidence.tier.tier)}` and is final.** It was \
 computed from a weighted mean of the available signals (P/E band, PEG, \
 price-to-book, forward-vs-trailing P/E, dividend yield). You may explain it — \
 including why a single headline multiple might look different from the tier — \

@@ -9,6 +9,8 @@ run produces the same on-disk report tree a CLI run does.
 from datetime import datetime
 from pathlib import Path
 
+from tradingagents.report_language import for_language
+
 
 def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     """Save a completed run's reports to ``save_path``; return the complete-report path."""
@@ -120,6 +122,11 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
 
     # Write consolidated report
-    header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # The title and stamp follow the report's language. The team and role
+    # headings above do not: consumers split the report on them.
+    L = for_language()
+    stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    header = L(f"# Trading Analysis Report: {ticker}\n\nGenerated: {stamp}\n\n",
+               f"# 交易分析报告：{ticker}\n\n生成时间：{stamp}\n\n")
     (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
     return save_path / "complete_report.md"

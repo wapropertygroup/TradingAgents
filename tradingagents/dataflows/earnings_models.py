@@ -40,12 +40,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal
 
+from tradingagents.report_language import ReportText, for_language
 from tradingagents.dataflows.evidence_values import (
     EPSILON,
     Value,
     _fmt,
     _fmt_large,
     bounded,
+    render_sources_section,
     safe_date,
     safe_float,
     safe_int,
@@ -1029,300 +1031,352 @@ _MISSING_SIGNAL_GAPS = {
 # ---------------------------------------------------------------------------
 
 
-def render_evidence_report(evidence: EarningsEvidence) -> str:
-    """Render the code-owned portion of the Earnings Analyst report."""
+def render_evidence_report(evidence: EarningsEvidence, language: str | None = None) -> str:
+    """Render the code-owned portion of the Earnings Analyst report.
+
+    ``language`` is an ``output_language`` value, ``None`` for the run's own.
+    English is unchanged by it; Chinese translates every label and note, the
+    band, and each data gap :mod:`tradingagents.report_language` knows.
+    """
+    L = for_language(language)
     if evidence.status in {"unsupported", "pit_unavailable", "no_coverage"}:
-        return _render_terminal_status(evidence)
+        return _render_terminal_status(evidence, L)
 
     parts = [
-        _render_header(evidence),
-        _render_momentum(evidence),
-        _render_primary_consensus(evidence),
-        _render_period_table(evidence),
-        _render_calendar(evidence),
-        _render_surprises(evidence),
-        _render_drift(evidence),
-        _render_sources(evidence),
+        _render_header(evidence, L),
+        _render_momentum(evidence, L),
+        _render_primary_consensus(evidence, L),
+        _render_period_table(evidence, L),
+        _render_calendar(evidence, L),
+        _render_surprises(evidence, L),
+        _render_drift(evidence, L),
+        _render_sources(evidence, L),
     ]
     return "\n\n".join(p for p in parts if p)
 
 
-def _render_terminal_status(evidence: EarningsEvidence) -> str:
+def _render_terminal_status(evidence: EarningsEvidence, L: ReportText) -> str:
     titles = {
-        "unsupported": "Earnings analysis not applicable",
-        "pit_unavailable": "Point-in-time earnings evidence unavailable",
-        "no_coverage": "No analyst estimate coverage",
+        "unsupported": L("Earnings analysis not applicable", "盈利分析不适用"),
+        "pit_unavailable": L("Point-in-time earnings evidence unavailable",
+                             "时点盈利证据不可用"),
+        "no_coverage": L("No analyst estimate coverage", "无分析师预期覆盖"),
     }
     lines = [
-        f"# Earnings & Estimate Revisions — {evidence.symbol}",
+        L(f"# Earnings & Estimate Revisions — {evidence.symbol}",
+          f"# 盈利与预期修正 — {evidence.symbol}"),
         "",
-        f"**Status:** {titles[evidence.status]}",
+        L(f"**Status:** {titles[evidence.status]}", f"**状态：** {titles[evidence.status]}"),
         "",
-        evidence.status_detail or "No detail supplied.",
+        L.message(evidence.status_detail or "No detail supplied."),
         "",
-        "No estimate, revision, surprise, or drift figures are reported for this "
-        "request. Do not substitute values from another period, another symbol, "
-        "or prior knowledge.",
+        L("No estimate, revision, surprise, or drift figures are reported for this "
+          "request. Do not substitute values from another period, another symbol, "
+          "or prior knowledge.",
+          "本次请求不报告任何预期、修正、惊喜或漂移数据。请勿用其他期间、其他代码或"
+          "既有知识中的数值替代。"),
     ]
     if evidence.sources:
-        lines += ["", "**Sources consulted:** " + ", ".join(evidence.sources)]
+        sources = L.join(L.source(s) for s in evidence.sources)
+        lines += ["", L(f"**Sources consulted:** {sources}", f"**已查询的数据源：** {sources}")]
     return "\n".join(lines)
 
 
-def _render_header(evidence: EarningsEvidence) -> str:
+def _render_header(evidence: EarningsEvidence, L: ReportText) -> str:
     name = evidence.company_name or evidence.symbol
     lines = [
-        f"# Earnings & Estimate Revisions — {name} ({evidence.symbol})",
+        L(f"# Earnings & Estimate Revisions — {name} ({evidence.symbol})",
+          f"# 盈利与预期修正 — {name}（{evidence.symbol}）"),
         "",
-        f"**As of:** {evidence.as_of}",
+        L(f"**As of:** {evidence.as_of}", f"**截至：** {evidence.as_of}"),
     ]
     if evidence.canonical_symbol and evidence.canonical_symbol != evidence.symbol:
-        lines.append(f"**Queried as:** {evidence.canonical_symbol}")
+        lines.append(L(f"**Queried as:** {evidence.canonical_symbol}",
+                       f"**查询代码：** {evidence.canonical_symbol}"))
     if evidence.currency:
-        lines.append(f"**Reporting currency:** {evidence.currency}")
+        lines.append(L(f"**Reporting currency:** {evidence.currency}",
+                       f"**报告货币：** {evidence.currency}"))
     if evidence.status == "partial":
-        lines.append(
+        lines.append(L(
             "**Coverage:** partial — see Data Gaps. Figures shown are measured; "
-            "absent fields are absent, not zero."
-        )
+            "absent fields are absent, not zero.",
+            "**覆盖：** 部分——见“数据缺口”。所列数字均为实测值；缺失的字段就是缺失，"
+            "并非零值。",
+        ))
     return "\n".join(lines)
 
 
-def _render_momentum(evidence: EarningsEvidence) -> str:
+def _period_label(period: FiscalPeriod, L: ReportText) -> str:
+    if not L.zh:
+        return period.label
+    if period.end_date:
+        if period.key.endswith("q"):
+            return f"截至 {period.end_date} 的季度"
+        return f"{period.end_date[:4]} 财年（财年截止 {period.end_date}）"
+    return L.relative_period(period.key) if period.key in _RELATIVE_PERIOD_LABELS \
+        else f"相对期间 {period.key}"
+
+
+def _render_momentum(evidence: EarningsEvidence, L: ReportText) -> str:
     m = evidence.momentum
     period = evidence.periods.get(m.period_key)
-    period_label = period.period.label if period else m.period_key
+    if period:
+        period_label = _period_label(period.period, L)
+    else:
+        period_label = L.relative_period(m.period_key)
+    score = m.score
     lines = [
-        "## Earnings Momentum",
+        L("## Earnings Momentum", "## 盈利动量"),
         "",
-        f"**{m.band}**"
-        + (f"  (score {m.score:+.3f} on -1..+1)" if m.score is not None else ""),
+        f"**{L.term(m.band)}**"
+        + (L(f"  (score {score:+.3f} on -1..+1)", f"（评分 {score:+.3f}，区间 -1 至 +1）")
+           if score is not None else ""),
         "",
-        f"- Period scored: {period_label}",
-        f"- Confidence: {m.confidence}",
-        f"- Signal coverage: {m.available_weight:.2f} of 1.00 weight available",
+        L(f"- Period scored: {period_label}", f"- 评分期间：{period_label}"),
+        L(f"- Confidence: {m.confidence}", f"- 置信度：{L.term(m.confidence)}"),
+        L(f"- Signal coverage: {m.available_weight:.2f} of 1.00 weight available",
+          f"- 信号覆盖：可用权重 {m.available_weight:.2f} / 1.00"),
     ]
     if m.signals:
         lines.append("")
-        lines.append("| Signal | Value | Weight |")
+        lines.append(L("| Signal | Value | Weight |", "| 信号 | 数值 | 权重 |"))
         lines.append("| --- | ---: | ---: |")
         for name in sorted(m.signals):
             lines.append(
-                f"| {name} | {m.signals[name]:+.3f} | {m.weights_used[name]:.2f} |"
+                f"| {L.signal(name)} | {m.signals[name]:+.3f} | {m.weights_used[name]:.2f} |"
             )
     if m.band == "Insufficient Data":
         lines += [
             "",
-            "Momentum is not scored: the available revision signals do not meet "
-            f"the {MIN_AVAILABLE_WEIGHT:.2f} weight floor, or no EPS trend horizon "
-            "was published. This is a statement about data coverage, not a neutral "
-            "verdict on the company.",
+            L("Momentum is not scored: the available revision signals do not meet "
+              f"the {MIN_AVAILABLE_WEIGHT:.2f} weight floor, or no EPS trend horizon "
+              "was published. This is a statement about data coverage, not a neutral "
+              "verdict on the company.",
+              f"动量未评分：可用的修正信号未达到 {MIN_AVAILABLE_WEIGHT:.2f} 的权重下限，"
+              "或数据源未发布任何 EPS 趋势期限。这是对数据覆盖的说明，而非对公司的中性判断。"),
         ]
     if m.discrepancies:
-        lines += ["", "**Retained discrepancies:**"]
-        lines += [f"- {d}" for d in m.discrepancies]
+        lines += ["", L("**Retained discrepancies:**", "**保留的数据矛盾：**")]
+        lines += [f"- {L.message(d)}" for d in m.discrepancies]
     return "\n".join(lines)
 
 
-def _render_primary_consensus(evidence: EarningsEvidence) -> str:
+def _render_primary_consensus(evidence: EarningsEvidence, L: ReportText) -> str:
     """The requested headline: FY consensus today vs 30 days ago, plus breadth."""
     period = evidence.primary_period
     if period is None:
         return ""
     eps = period.eps
+    label = _period_label(period.period, L)
     lines = [
-        f"## {period.period.label} EPS Consensus",
+        L(f"## {label} EPS Consensus", f"## {label} EPS 一致预期"),
         "",
-        "| Horizon | Consensus EPS |",
+        L("| Horizon | Consensus EPS |", "| 时点 | EPS 一致预期 |"),
         "| --- | ---: |",
-        f"| 90 days ago | {_fmt(eps.days_ago_90)} |",
-        f"| 60 days ago | {_fmt(eps.days_ago_60)} |",
-        f"| 30 days ago | {_fmt(eps.days_ago_30)} |",
-        f"| 7 days ago | {_fmt(eps.days_ago_7)} |",
-        f"| **Today** | **{_fmt(eps.current)}** |",
+        L(f"| 90 days ago | {L.fmt(eps.days_ago_90)} |", f"| 90 天前 | {L.fmt(eps.days_ago_90)} |"),
+        L(f"| 60 days ago | {L.fmt(eps.days_ago_60)} |", f"| 60 天前 | {L.fmt(eps.days_ago_60)} |"),
+        L(f"| 30 days ago | {L.fmt(eps.days_ago_30)} |", f"| 30 天前 | {L.fmt(eps.days_ago_30)} |"),
+        L(f"| 7 days ago | {L.fmt(eps.days_ago_7)} |", f"| 7 天前 | {L.fmt(eps.days_ago_7)} |"),
+        L(f"| **Today** | **{L.fmt(eps.current)}** |", f"| **今日** | **{L.fmt(eps.current)}** |"),
     ]
 
     changes = [
-        ("7 days", eps.change("7d")),
-        ("30 days", eps.change("30d")),
-        ("90 days", eps.change("90d")),
+        (7, eps.change("7d")),
+        (30, eps.change("30d")),
+        (90, eps.change("90d")),
     ]
     rendered = [
-        f"- Over {label}: {value * 100:+.2f}% (symmetric)"
-        for label, value in changes
+        L(f"- Over {days} days: {value * 100:+.2f}% (symmetric)",
+          f"- {days} 天内：{value * 100:+.2f}%（对称变化）")
+        for days, value in changes
         if value is not None
     ]
     if rendered:
-        lines += ["", "**Estimate change**", *rendered]
-        lines.append(
+        lines += ["", L("**Estimate change**", "**预期变化**"), *rendered]
+        lines.append(L(
             "  Symmetric change is `2(new-old)/(|new|+|old|)`, which keeps its sign "
-            "when EPS is negative or crosses zero. It is not an ordinary percentage."
-        )
+            "when EPS is negative or crosses zero. It is not an ordinary percentage.",
+            "  对称变化为 `2(new-old)/(|new|+|old|)`，在 EPS 为负或穿越零时仍保持正确的"
+            "符号，并非普通百分比。",
+        ))
 
-    lines += ["", "**Revision breadth**"]
+    lines += ["", L("**Revision breadth**", "**修正广度**")]
     for window in ("7d", "30d", "90d"):
         up, down = {
             "7d": (period.breadth.up_7d, period.breadth.down_7d),
             "30d": (period.breadth.up_30d, period.breadth.down_30d),
             "90d": (period.breadth.up_90d, period.breadth.down_90d),
         }[window]
+        days = window[:-1]
         if up.available and down.available:
             ratio = period.breadth.net_ratio(window)
-            ratio_text = f", net {ratio:+.3f}" if ratio is not None else ""
-            lines.append(
-                f"- Last {window}: +{_fmt(up)} raised / -{_fmt(down)} lowered{ratio_text}"
-            )
+            lines.append(L(
+                f"- Last {window}: +{_fmt(up)} raised / -{_fmt(down)} lowered"
+                + (f", net {ratio:+.3f}" if ratio is not None else ""),
+                f"- 近 {days} 天：上调 {_fmt(up)} / 下调 {_fmt(down)}"
+                + (f"，净值 {ratio:+.3f}" if ratio is not None else ""),
+            ))
         else:
-            reason = up.unavailable_reason or down.unavailable_reason or "not reported"
-            lines.append(f"- Last {window}: unavailable ({reason})")
+            reason = L.message(up.unavailable_reason or down.unavailable_reason
+                               or "not reported")
+            lines.append(L(f"- Last {window}: unavailable ({reason})",
+                           f"- 近 {days} 天：不可用（{reason}）"))
 
-    lines.append(f"- Analysts covering this period: {_fmt(period.analyst_count)}")
+    count = L.fmt(period.analyst_count)
+    lines.append(L(f"- Analysts covering this period: {count}", f"- 覆盖该期间的分析师：{count}"))
     if period.revenue.current.available:
+        today = L.fmt(period.revenue.current)
         lines += [
             "",
-            "**Revenue consensus**",
-            f"- Today: {_fmt(period.revenue.current)}",
+            L("**Revenue consensus**", "**营收一致预期**"),
+            L(f"- Today: {today}", f"- 今日：{today}"),
         ]
         rev_30 = period.revenue.change("30d")
         if rev_30 is not None:
-            lines.append(f"- Over 30 days: {rev_30 * 100:+.2f}% (symmetric)")
+            lines.append(L(f"- Over 30 days: {rev_30 * 100:+.2f}% (symmetric)",
+                           f"- 30 天内：{rev_30 * 100:+.2f}%（对称变化）"))
         else:
-            lines.append(
+            lines.append(L(
                 "- Over 30 days: unavailable — no consulted provider publishes a "
-                "revenue revision history"
-            )
+                "revenue revision history",
+                "- 30 天内：不可用——所查询的数据源均未发布营收修正历史",
+            ))
     return "\n".join(lines)
 
 
-def _render_period_table(evidence: EarningsEvidence) -> str:
+def _render_period_table(evidence: EarningsEvidence, L: ReportText) -> str:
     if not evidence.periods:
         return ""
     lines = [
-        "## All Forecast Periods",
+        L("## All Forecast Periods", "## 全部预测期间"),
         "",
-        "| Period | EPS today | 30d ago | 90d ago | Up 30d | Down 30d | Analysts |",
+        L("| Period | EPS today | 30d ago | 90d ago | Up 30d | Down 30d | Analysts |",
+          "| 期间 | 今日 EPS | 30 天前 | 90 天前 | 30 天上调 | 30 天下调 | 分析师数 |"),
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for key in sorted(evidence.periods, key=period_sort_key):
         p = evidence.periods[key]
         lines.append(
-            f"| {p.period.label} | {_fmt(p.eps.current)} | {_fmt(p.eps.days_ago_30)} "
-            f"| {_fmt(p.eps.days_ago_90)} | {_fmt(p.breadth.up_30d)} "
-            f"| {_fmt(p.breadth.down_30d)} | {_fmt(p.analyst_count)} |"
+            f"| {_period_label(p.period, L)} | {L.fmt(p.eps.current)} "
+            f"| {L.fmt(p.eps.days_ago_30)} | {L.fmt(p.eps.days_ago_90)} "
+            f"| {L.fmt(p.breadth.up_30d)} | {L.fmt(p.breadth.down_30d)} "
+            f"| {L.fmt(p.analyst_count)} |"
         )
     return "\n".join(lines)
 
 
-def _render_calendar(evidence: EarningsEvidence) -> str:
+def _render_calendar(evidence: EarningsEvidence, L: ReportText) -> str:
     cal = evidence.calendar
-    lines = ["## Next Earnings Date", ""]
+    lines = [L("## Next Earnings Date", "## 下次财报日期"), ""]
     if not cal.available:
-        lines.append(
-            f"Unavailable ({cal.unavailable_reason or 'not reported by any consulted provider'}). "
-            "Do not infer a date from the reporting cadence."
-        )
+        reason = L.message(cal.unavailable_reason or "not reported by any consulted provider")
+        lines.append(L(
+            f"Unavailable ({reason}). Do not infer a date from the reporting cadence.",
+            f"不可用（{reason}）。请勿根据披露节奏推断日期。",
+        ))
         return "\n".join(lines)
 
     when = cal.next_date
     if cal.next_date_range_end and cal.next_date_range_end != cal.next_date:
         when = f"{cal.next_date} — {cal.next_date_range_end}"
     days = cal.days_until(evidence.as_of)
-    suffix = f" ({days:+d} days from as-of)" if days is not None else ""
-    lines.append(f"- Date: {when}{suffix}")
+    suffix = L(f" ({days:+d} days from as-of)", f"（距截至日 {days:+d} 天）") \
+        if days is not None else ""
+    lines.append(L(f"- Date: {when}{suffix}", f"- 日期：{when}{suffix}"))
     if cal.date_is_estimated:
-        lines.append(
+        lines.append(L(
             "- ⚠️ Unconfirmed: the provider supplied a window, not an issuer-confirmed "
-            "date. Any earnings-blackout rule must treat the whole window as in scope."
-        )
+            "date. Any earnings-blackout rule must treat the whole window as in scope.",
+            "- ⚠️ 未确认：数据源提供的是时间窗口，而非发行人确认的日期。任何财报静默期规则"
+            "都必须把整个窗口视为适用范围。",
+        ))
     if cal.timing and cal.timing != "unknown":
-        lines.append(f"- Timing: {cal.timing}")
+        timing = L.message(cal.timing)
+        lines.append(L(f"- Timing: {timing}", f"- 发布时间：{timing}"))
     else:
-        lines.append("- Timing (before/after market): unavailable")
-    lines.append(f"- Consensus EPS: {_fmt(cal.eps_estimate_avg)}")
+        lines.append(L("- Timing (before/after market): unavailable",
+                       "- 发布时间（盘前/盘后）：不可用"))
+    lines.append(L(f"- Consensus EPS: {L.fmt(cal.eps_estimate_avg)}",
+                   f"- EPS 一致预期：{L.fmt(cal.eps_estimate_avg)}"))
     if cal.eps_estimate_low.available or cal.eps_estimate_high.available:
-        lines.append(
-            f"- Consensus EPS range: {_fmt(cal.eps_estimate_low)} — {_fmt(cal.eps_estimate_high)}"
-        )
-    lines.append(f"- Consensus revenue: {_fmt(cal.revenue_estimate_avg)}")
+        low, high = L.fmt(cal.eps_estimate_low), L.fmt(cal.eps_estimate_high)
+        lines.append(L(f"- Consensus EPS range: {low} — {high}",
+                       f"- EPS 一致预期区间：{low} — {high}"))
+    lines.append(L(f"- Consensus revenue: {L.fmt(cal.revenue_estimate_avg)}",
+                   f"- 营收一致预期：{L.fmt(cal.revenue_estimate_avg)}"))
     return "\n".join(lines)
 
 
-def _render_surprises(evidence: EarningsEvidence) -> str:
+def _render_surprises(evidence: EarningsEvidence, L: ReportText) -> str:
     if not evidence.surprises:
-        return (
+        return L(
             "## Surprise History\n\nUnavailable — no reported-quarter history was "
-            "returned by any consulted provider."
+            "returned by any consulted provider.",
+            "## 业绩惊喜历史\n\n暂无——所查询的数据源均未返回已报告季度的历史。",
         )
     lines = [
-        "## Surprise History",
+        L("## Surprise History", "## 业绩惊喜历史"),
         "",
-        "| Fiscal quarter end | Reported EPS | Consensus | Difference | Surprise | Announced |",
+        L("| Fiscal quarter end | Reported EPS | Consensus | Difference | Surprise | Announced |",
+          "| 财季截止日 | 实际 EPS | 一致预期 | 差额 | 惊喜幅度 | 公布日期 |"),
         "| --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for s in evidence.surprises:
         lines.append(
-            f"| {s.fiscal_period_end} | {_fmt(s.eps_actual)} | {_fmt(s.eps_estimate)} "
-            f"| {_fmt(s.eps_difference)} | {_fmt(s.surprise_pct)} "
-            f"| {s.announcement_date or 'unavailable'} |"
+            f"| {s.fiscal_period_end} | {L.fmt(s.eps_actual)} | {L.fmt(s.eps_estimate)} "
+            f"| {L.fmt(s.eps_difference)} | {L.fmt(s.surprise_pct)} "
+            f"| {s.announcement_date or L('unavailable', '不可用')} |"
         )
     beats = [s.beat for s in evidence.surprises if s.beat is not None]
     if beats:
+        hit = sum(1 for b in beats if b)
         lines += [
             "",
-            f"- Beat rate over the last {len(beats)} reported quarters: "
-            f"{sum(1 for b in beats if b)}/{len(beats)}",
+            L(f"- Beat rate over the last {len(beats)} reported quarters: {hit}/{len(beats)}",
+              f"- 最近 {len(beats)} 个已报告季度的超预期比率：{hit}/{len(beats)}"),
         ]
-    lines.append(
+    lines.append(L(
         "- Quarter-end dates are fiscal period ends, not announcement dates. A "
         "restatement or provider correction can change a historical row, so these "
-        "are the current vintage rather than the figures known at the time."
-    )
+        "are the current vintage rather than the figures known at the time.",
+        "- 季度截止日是财政期间的结束日，而非公布日期。重述或数据源更正可能改变历史行，"
+        "因此这些是当前版本的数字，而非当时已知的数字。",
+    ))
     return "\n".join(lines)
 
 
-def _render_drift(evidence: EarningsEvidence) -> str:
-    lines = ["## Post-Earnings Drift", ""]
+def _render_drift(evidence: EarningsEvidence, L: ReportText) -> str:
+    lines = [L("## Post-Earnings Drift", "## 财报后漂移"), ""]
     if not evidence.drift:
-        lines.append(
-            "Unavailable — "
-            + (
-                evidence.drift_unavailable_reason
-                or "announcement dates were not available, and drift cannot be anchored "
-                "to a fiscal quarter end without misdating the market reaction."
-            )
+        reason = L.message(
+            evidence.drift_unavailable_reason
+            or "announcement dates were not available, and drift cannot be anchored "
+            "to a fiscal quarter end without misdating the market reaction."
         )
+        lines.append(L(f"Unavailable — {reason}", f"暂无——{reason}"))
         return "\n".join(lines)
     lines += [
-        "| Quarter end | Announced | Anchor session | Sessions | Stock | Benchmark | Excess |",
+        L("| Quarter end | Announced | Anchor session | Sessions | Stock | Benchmark | Excess |",
+          "| 季度截止日 | 公布日期 | 锚定交易日 | 交易日数 | 个股 | 基准 | 超额 |"),
         "| --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for d in evidence.drift:
         lines.append(
             f"| {d.fiscal_period_end} | {d.announcement_date} | {d.anchor_session} "
-            f"| {d.sessions} | {_fmt(d.stock_return)} | {_fmt(d.benchmark_return)} "
-            f"| {_fmt(d.excess_return)} |"
+            f"| {d.sessions} | {L.fmt(d.stock_return)} | {L.fmt(d.benchmark_return)} "
+            f"| {L.fmt(d.excess_return)} |"
         )
     lines.append("")
-    lines.append(
+    lines.append(L(
         "- Windows are measured in trading sessions from the first tradable session "
         "at or after the announcement, so a release on a holiday or after the close "
-        "anchors to the next open session."
-    )
+        "anchors to the next open session.",
+        "- 窗口按交易日计算，起点为公布当日或之后的第一个可交易日，因此在假日或收盘后"
+        "发布的财报锚定到下一个开盘交易日。",
+    ))
     return "\n".join(lines)
 
 
-def _render_sources(evidence: EarningsEvidence) -> str:
-    lines = ["## Sources & Data Gaps", ""]
-    lines.append(
-        "**Sources:** " + (", ".join(evidence.sources) if evidence.sources else "none recorded")
-    )
-    lines.append("")
-    if evidence.data_gaps:
-        lines.append("**Data gaps (measured absences, not zeros):**")
-        lines += [f"- {g}" for g in evidence.data_gaps]
-    else:
-        lines.append("**Data gaps:** none.")
-    if evidence.warnings:
-        lines += ["", "**Warnings:**"]
-        lines += [f"- {w}" for w in evidence.warnings]
-    return "\n".join(lines)
+def _render_sources(evidence: EarningsEvidence, L: ReportText) -> str:
+    return render_sources_section(evidence.sources, evidence.data_gaps,
+                                  evidence.warnings, L)

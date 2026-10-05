@@ -43,13 +43,14 @@ from typing import Any, Literal
 
 from tradingagents.dataflows.evidence_values import (
     Value,
-    _fmt,
     piecewise_score,
+    render_sources_section,
     safe_float,
     safe_int,
     safe_ratio,
     weighted_mean_score,
 )
+from tradingagents.report_language import ReportText, for_language
 
 SCHEMA_VERSION = 1
 
@@ -353,85 +354,95 @@ def finalize_evidence(evidence: QualityEvidence) -> QualityEvidence:
     return replace(evidence, tier=tier, data_gaps=gaps, status=status)
 
 
-def render_quality_report(evidence: QualityEvidence) -> str:
-    """Render the code-owned portion of the Quality Analyst report."""
+def render_quality_report(evidence: QualityEvidence, language: str | None = None) -> str:
+    """Render the code-owned portion of the Quality Analyst report.
+
+    ``language`` is an ``output_language`` value, ``None`` for the run's own.
+    """
+    L = for_language(language)
     if evidence.status in {"unsupported", "no_coverage"}:
-        return _render_terminal_status(evidence)
+        return _render_terminal_status(evidence, L)
 
     e = evidence
     name = e.company_name or e.symbol
     lines = [
-        f"# Business Quality — {name} ({e.symbol})",
+        L(f"# Business Quality — {name} ({e.symbol})", f"# 经营质量 — {name}（{e.symbol}）"),
         "",
-        f"**As of:** {e.as_of}",
+        L(f"**As of:** {e.as_of}", f"**截至：** {e.as_of}"),
     ]
     if e.status == "partial":
-        lines.append(
+        lines.append(L(
             "**Coverage:** partial — see Data Gaps. Figures shown are measured; "
-            "absent fields are absent, not zero."
-        )
-    lines += ["", "## Quality Tier", "", f"**{e.tier.tier}**"
-             + (f"  (score {e.tier.score:+.3f} on -1..+1)" if e.tier.score is not None else "")]
+            "absent fields are absent, not zero.",
+            "**覆盖：** 部分——见“数据缺口”。所列数字均为实测值；缺失的字段就是缺失，"
+            "并非零值。",
+        ))
+    score = e.tier.score
+    lines += ["", L("## Quality Tier", "## 质量评级"), "", f"**{L.term(e.tier.tier)}**"
+             + (L(f"  (score {score:+.3f} on -1..+1)", f"（评分 {score:+.3f}，区间 -1 至 +1）")
+                if score is not None else "")]
     lines += [
         "",
-        f"- Signal coverage: {e.tier.available_weight:.2f} of 1.00 weight available",
+        L(f"- Signal coverage: {e.tier.available_weight:.2f} of 1.00 weight available",
+          f"- 信号覆盖：可用权重 {e.tier.available_weight:.2f} / 1.00"),
     ]
     if e.tier.signals:
-        lines += ["", "| Signal | Value | Weight |", "| --- | ---: | ---: |"]
+        lines += ["", L("| Signal | Value | Weight |", "| 信号 | 数值 | 权重 |"), "| --- | ---: | ---: |"]
         for sig in sorted(e.tier.signals):
-            lines.append(f"| {sig} | {e.tier.signals[sig]:+.3f} | {e.tier.weights_used[sig]:.2f} |")
+            lines.append(f"| {L.signal(sig)} | {e.tier.signals[sig]:+.3f} "
+                         f"| {e.tier.weights_used[sig]:.2f} |")
     if e.tier.tier == "Insufficient Data":
         lines += [
             "",
-            "Quality is not scored: the available signals do not meet the "
-            f"{MIN_AVAILABLE_WEIGHT:.2f} weight floor. This is a statement about "
-            "data coverage, not a neutral verdict on the business.",
+            L("Quality is not scored: the available signals do not meet the "
+              f"{MIN_AVAILABLE_WEIGHT:.2f} weight floor. This is a statement about "
+              "data coverage, not a neutral verdict on the business.",
+              f"质量未评分：可用信号未达到 {MIN_AVAILABLE_WEIGHT:.2f} 的权重下限。"
+              "这是对数据覆盖的说明，而非对业务的中性判断。"),
         ]
 
     lines += [
         "",
-        "## Profitability & Balance Sheet",
+        L("## Profitability & Balance Sheet", "## 盈利能力与资产负债表"),
         "",
-        f"- Return on equity: {_fmt(e.return_on_equity)}",
-        f"- Operating margin: {_fmt(e.operating_margin)}",
-        f"- Profit margin: {_fmt(e.profit_margin)}",
-        f"- Return on assets: {_fmt(e.return_on_assets)}",
-        f"- Debt to equity: {_fmt(e.debt_to_equity)}",
-        f"- Current ratio: {_fmt(e.current_ratio)}",
-        f"- Free cash flow: {_fmt(e.free_cash_flow)}",
+        L(f"- Return on equity: {L.fmt(e.return_on_equity)}",
+          f"- 净资产收益率：{L.fmt(e.return_on_equity)}"),
+        L(f"- Operating margin: {L.fmt(e.operating_margin)}",
+          f"- 营业利润率：{L.fmt(e.operating_margin)}"),
+        L(f"- Profit margin: {L.fmt(e.profit_margin)}", f"- 净利润率：{L.fmt(e.profit_margin)}"),
+        L(f"- Return on assets: {L.fmt(e.return_on_assets)}",
+          f"- 总资产收益率：{L.fmt(e.return_on_assets)}"),
+        L(f"- Debt to equity: {L.fmt(e.debt_to_equity)}", f"- 债务权益比：{L.fmt(e.debt_to_equity)}"),
+        L(f"- Current ratio: {L.fmt(e.current_ratio)}", f"- 流动比率：{L.fmt(e.current_ratio)}"),
+        L(f"- Free cash flow: {L.fmt(e.free_cash_flow)}", f"- 自由现金流：{L.fmt(e.free_cash_flow)}"),
     ]
     fcf_margin = e.fcf_margin
     if fcf_margin is not None:
-        lines.append(f"- Free cash flow margin: {fcf_margin * 100:+.2f}%")
+        lines.append(L(f"- Free cash flow margin: {fcf_margin * 100:+.2f}%",
+                       f"- 自由现金流利润率：{fcf_margin * 100:+.2f}%"))
 
     if e.margin_history:
-        lines += ["", "## Operating Margin History", "",
-                 "| Period | Operating Margin |", "| --- | ---: |"]
+        lines += ["", L("## Operating Margin History", "## 营业利润率历史"), "",
+                 L("| Period | Operating Margin |", "| 期间 | 营业利润率 |"), "| --- | ---: |"]
         for period, val in zip(e.margin_history_periods, e.margin_history):
-            lines.append(f"| {period} | {_fmt(val)} |")
+            lines.append(f"| {period} | {L.fmt(val)} |")
 
-    lines += ["", "## Sources & Data Gaps", "",
-             "**Sources:** " + (", ".join(e.sources) if e.sources else "none recorded")]
-    if e.data_gaps:
-        lines += ["", "**Data gaps (measured absences, not zeros):**"]
-        lines += [f"- {g}" for g in e.data_gaps]
-    else:
-        lines += ["", "**Data gaps:** none."]
-    if e.warnings:
-        lines += ["", "**Warnings:**"] + [f"- {w}" for w in e.warnings]
+    lines += ["", render_sources_section(e.sources, e.data_gaps, e.warnings, L)]
     return "\n".join(lines)
 
 
-def _render_terminal_status(evidence: QualityEvidence) -> str:
-    titles = {"unsupported": "Quality analysis not applicable",
-             "no_coverage": "No fundamentals coverage"}
+def _render_terminal_status(evidence: QualityEvidence, L: ReportText) -> str:
+    titles = {"unsupported": L("Quality analysis not applicable", "经营质量分析不适用"),
+             "no_coverage": L("No fundamentals coverage", "无基本面数据覆盖")}
     lines = [
-        f"# Business Quality — {evidence.symbol}", "",
-        f"**Status:** {titles[evidence.status]}", "",
-        evidence.status_detail or "No detail supplied.", "",
-        "No quality figures are reported for this request. Do not substitute "
-        "values from another symbol or prior knowledge.",
+        L(f"# Business Quality — {evidence.symbol}", f"# 经营质量 — {evidence.symbol}"), "",
+        L(f"**Status:** {titles[evidence.status]}", f"**状态：** {titles[evidence.status]}"), "",
+        L.message(evidence.status_detail or "No detail supplied."), "",
+        L("No quality figures are reported for this request. Do not substitute "
+          "values from another symbol or prior knowledge.",
+          "本次请求不报告任何质量数据。请勿用其他代码或既有知识中的数值替代。"),
     ]
     if evidence.sources:
-        lines += ["", "**Sources consulted:** " + ", ".join(evidence.sources)]
+        sources = L.join(L.source(s) for s in evidence.sources)
+        lines += ["", L(f"**Sources consulted:** {sources}", f"**已查询的数据源：** {sources}")]
     return "\n".join(lines)

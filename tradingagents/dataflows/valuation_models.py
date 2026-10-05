@@ -40,14 +40,15 @@ from typing import Any, Literal
 
 from tradingagents.dataflows.evidence_values import (
     Value,
-    _fmt,
     bounded,
     piecewise_score,
+    render_sources_section,
     safe_float,
     safe_int,
     safe_ratio,
     weighted_mean_score,
 )
+from tradingagents.report_language import ReportText, for_language
 
 SCHEMA_VERSION = 1
 
@@ -303,73 +304,79 @@ def finalize_evidence(evidence: ValuationEvidence) -> ValuationEvidence:
     return replace(evidence, tier=tier, data_gaps=gaps, status=status)
 
 
-def render_valuation_report(evidence: ValuationEvidence) -> str:
-    """Render the code-owned portion of the Valuation Analyst report."""
+def render_valuation_report(evidence: ValuationEvidence, language: str | None = None) -> str:
+    """Render the code-owned portion of the Valuation Analyst report.
+
+    ``language`` is an ``output_language`` value, ``None`` for the run's own.
+    """
+    L = for_language(language)
     if evidence.status in {"unsupported", "no_coverage"}:
-        return _render_terminal_status(evidence)
+        return _render_terminal_status(evidence, L)
 
     e = evidence
     name = e.company_name or e.symbol
     lines = [
-        f"# Valuation — {name} ({e.symbol})",
+        L(f"# Valuation — {name} ({e.symbol})", f"# 估值 — {name}（{e.symbol}）"),
         "",
-        f"**As of:** {e.as_of}",
+        L(f"**As of:** {e.as_of}", f"**截至：** {e.as_of}"),
     ]
     if e.status == "partial":
-        lines.append(
+        lines.append(L(
             "**Coverage:** partial — see Data Gaps. Figures shown are measured; "
-            "absent fields are absent, not zero."
-        )
-    lines += ["", "## Valuation Tier", "", f"**{e.tier.tier}**"
-             + (f"  (score {e.tier.score:+.3f} on -1..+1)" if e.tier.score is not None else "")]
-    lines += ["", f"- Signal coverage: {e.tier.available_weight:.2f} of 1.00 weight available"]
+            "absent fields are absent, not zero.",
+            "**覆盖：** 部分——见“数据缺口”。所列数字均为实测值；缺失的字段就是缺失，"
+            "并非零值。",
+        ))
+    score = e.tier.score
+    lines += ["", L("## Valuation Tier", "## 估值评级"), "", f"**{L.term(e.tier.tier)}**"
+             + (L(f"  (score {score:+.3f} on -1..+1)", f"（评分 {score:+.3f}，区间 -1 至 +1）")
+                if score is not None else "")]
+    lines += ["", L(f"- Signal coverage: {e.tier.available_weight:.2f} of 1.00 weight available",
+                    f"- 信号覆盖：可用权重 {e.tier.available_weight:.2f} / 1.00")]
     if e.tier.signals:
-        lines += ["", "| Signal | Value | Weight |", "| --- | ---: | ---: |"]
+        lines += ["", L("| Signal | Value | Weight |", "| 信号 | 数值 | 权重 |"), "| --- | ---: | ---: |"]
         for sig in sorted(e.tier.signals):
-            lines.append(f"| {sig} | {e.tier.signals[sig]:+.3f} | {e.tier.weights_used[sig]:.2f} |")
+            lines.append(f"| {L.signal(sig)} | {e.tier.signals[sig]:+.3f} "
+                         f"| {e.tier.weights_used[sig]:.2f} |")
     if e.tier.tier == "Insufficient Data":
         lines += [
             "",
-            "Valuation is not scored: the available signals do not meet the "
-            f"{MIN_AVAILABLE_WEIGHT:.2f} weight floor. This is a statement about "
-            "data coverage (commonly a negative-earnings company with no "
-            "trailing P/E), not a neutral verdict on price.",
+            L("Valuation is not scored: the available signals do not meet the "
+              f"{MIN_AVAILABLE_WEIGHT:.2f} weight floor. This is a statement about "
+              "data coverage (commonly a negative-earnings company with no "
+              "trailing P/E), not a neutral verdict on price.",
+              f"估值未评分：可用信号未达到 {MIN_AVAILABLE_WEIGHT:.2f} 的权重下限。"
+              "这是对数据覆盖的说明（常见于没有历史市盈率的亏损公司），而非对价格的中性判断。"),
         ]
 
     lines += [
         "",
-        "## Multiples",
+        L("## Multiples", "## 估值倍数"),
         "",
-        f"- Trailing P/E: {_fmt(e.trailing_pe)}",
-        f"- Forward P/E: {_fmt(e.forward_pe)}",
-        f"- PEG ratio: {_fmt(e.peg_ratio)}",
-        f"- Price to book: {_fmt(e.price_to_book)}",
-        f"- Dividend yield: {_fmt(e.dividend_yield)}",
-        f"- Market cap: {_fmt(e.market_cap)}",
+        L(f"- Trailing P/E: {L.fmt(e.trailing_pe)}", f"- 历史市盈率：{L.fmt(e.trailing_pe)}"),
+        L(f"- Forward P/E: {L.fmt(e.forward_pe)}", f"- 远期市盈率：{L.fmt(e.forward_pe)}"),
+        L(f"- PEG ratio: {L.fmt(e.peg_ratio)}", f"- PEG 比率：{L.fmt(e.peg_ratio)}"),
+        L(f"- Price to book: {L.fmt(e.price_to_book)}", f"- 市净率：{L.fmt(e.price_to_book)}"),
+        L(f"- Dividend yield: {L.fmt(e.dividend_yield)}", f"- 股息率：{L.fmt(e.dividend_yield)}"),
+        L(f"- Market cap: {L.fmt(e.market_cap)}", f"- 市值：{L.fmt(e.market_cap)}"),
     ]
 
-    lines += ["", "## Sources & Data Gaps", "",
-             "**Sources:** " + (", ".join(e.sources) if e.sources else "none recorded")]
-    if e.data_gaps:
-        lines += ["", "**Data gaps (measured absences, not zeros):**"]
-        lines += [f"- {g}" for g in e.data_gaps]
-    else:
-        lines += ["", "**Data gaps:** none."]
-    if e.warnings:
-        lines += ["", "**Warnings:**"] + [f"- {w}" for w in e.warnings]
+    lines += ["", render_sources_section(e.sources, e.data_gaps, e.warnings, L)]
     return "\n".join(lines)
 
 
-def _render_terminal_status(evidence: ValuationEvidence) -> str:
-    titles = {"unsupported": "Valuation analysis not applicable",
-             "no_coverage": "No valuation coverage"}
+def _render_terminal_status(evidence: ValuationEvidence, L: ReportText) -> str:
+    titles = {"unsupported": L("Valuation analysis not applicable", "估值分析不适用"),
+             "no_coverage": L("No valuation coverage", "无估值数据覆盖")}
     lines = [
-        f"# Valuation — {evidence.symbol}", "",
-        f"**Status:** {titles[evidence.status]}", "",
-        evidence.status_detail or "No detail supplied.", "",
-        "No valuation figures are reported for this request. Do not substitute "
-        "values from another symbol or prior knowledge.",
+        L(f"# Valuation — {evidence.symbol}", f"# 估值 — {evidence.symbol}"), "",
+        L(f"**Status:** {titles[evidence.status]}", f"**状态：** {titles[evidence.status]}"), "",
+        L.message(evidence.status_detail or "No detail supplied."), "",
+        L("No valuation figures are reported for this request. Do not substitute "
+          "values from another symbol or prior knowledge.",
+          "本次请求不报告任何估值数据。请勿用其他代码或既有知识中的数值替代。"),
     ]
     if evidence.sources:
-        lines += ["", "**Sources consulted:** " + ", ".join(evidence.sources)]
+        sources = L.join(L.source(s) for s in evidence.sources)
+        lines += ["", L(f"**Sources consulted:** {sources}", f"**已查询的数据源：** {sources}")]
     return "\n".join(lines)

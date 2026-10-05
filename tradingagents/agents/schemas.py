@@ -23,6 +23,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from tradingagents.report_language import for_language
+
 # LLMs sometimes write a placeholder string ("None", "N/A", ...) into an optional
 # numeric field instead of omitting it. Coerce those to None so the structured
 # call validates instead of erroring (#1058). Pydantic still parses real numeric
@@ -127,14 +129,21 @@ class ResearchPlan(BaseModel):
     )
 
 
-def render_research_plan(plan: ResearchPlan) -> str:
-    """Render a ResearchPlan to markdown for storage and the trader's prompt context."""
+def render_research_plan(plan: ResearchPlan, language: str | None = None) -> str:
+    """Render a ResearchPlan to markdown for storage and the trader's prompt context.
+
+    ``language`` is an ``output_language`` value; ``None`` reads the run's. The
+    same holds for every renderer below.
+    """
+    L = for_language(language)
+    rec = plan.recommendation.value
     return "\n".join([
-        f"**Recommendation**: {plan.recommendation.value}",
+        L(f"**Recommendation**: {rec}", f"**投资建议**：{L.term(rec)}"),
         "",
-        f"**Rationale**: {plan.rationale}",
+        L(f"**Rationale**: {plan.rationale}", f"**依据**：{plan.rationale}"),
         "",
-        f"**Strategic Actions**: {plan.strategic_actions}",
+        L(f"**Strategic Actions**: {plan.strategic_actions}",
+          f"**策略行动**：{plan.strategic_actions}"),
     ])
 
 
@@ -318,32 +327,54 @@ _FLAG_TEXT = {
                            "rating reads as an instruction and the size cancels it"),
 }
 
+#: The same, for a Chinese report.
+_FLAG_TEXT_ZH = {
+    "size_ambiguous": ("仓位规模有歧义——写成了不大于 1 的数值，既可能表示该百分比，"
+                       "也可能表示其百分之一；请视为未说明仓位"),
+    "size_out_of_range": "仓位规模超过组合的 100%",
+    "stop_not_below_entry": "买入时止损价未低于入场价",
+    "stop_not_above_entry": "卖出时止损价未高于入场价",
+    "target_wrong_side": "目标价在所述方向上无法获利",
+    "levels_without_direction": "持有时给出了入场价、止损价或目标价，而持有没有方向可言",
+    "size_zero_on_a_buy": "评级为买入，但仓位为 0%——评级读起来是指令，仓位却将其抵消",
+}
 
-def render_trader_proposal(proposal: TraderProposal) -> str:
+
+def _level_warnings(flags: list[str], L) -> str:
+    if L.zh:
+        return "**价位警示**：" + "；".join(_FLAG_TEXT_ZH.get(f, f) for f in flags)
+    return "**Level Warnings**: " + ", ".join(_FLAG_TEXT.get(f, f) for f in flags)
+
+
+def render_trader_proposal(proposal: TraderProposal, language: str | None = None) -> str:
     """Render a TraderProposal to markdown.
 
     The trailing ``FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**`` line is
     preserved for backward compatibility with the analyst stop-signal text
-    and any external code that greps for it.
+    and any external code that greps for it. A Chinese report writes it
+    ``最终交易建议：**买入**``, which is what ystocker's report reader matches.
     """
+    L = for_language(language)
+    action = proposal.action.value
     parts = [
-        f"**Action**: {proposal.action.value}",
+        L(f"**Action**: {action}", f"**操作建议**：{L.term(action)}"),
         "",
-        f"**Reasoning**: {proposal.reasoning}",
+        L(f"**Reasoning**: {proposal.reasoning}", f"**理由**：{proposal.reasoning}"),
     ]
     # Named even when absent, so a reader can tell a level the trader chose not
     # to give from one the schema never asked for. Upstream's rule, applied to
     # this fork's wider set of levels.
+    size = proposal.position_size_pct
     for label, value in (
-        ("Entry Price", proposal.entry_price),
-        ("Stop Loss", proposal.stop_loss),
-        ("Target Price", proposal.target_price),
-        ("Position Size", None if proposal.position_size_pct is None
-                          else f"{proposal.position_size_pct}% of portfolio"),
-        ("Position Sizing", proposal.position_sizing),
+        (L("Entry Price", "入场价"), proposal.entry_price),
+        (L("Stop Loss", "止损价"), proposal.stop_loss),
+        (L("Target Price", "目标价"), proposal.target_price),
+        (L("Position Size", "仓位规模"),
+         None if size is None else L(f"{size}% of portfolio", f"组合的 {size}%")),
+        (L("Position Sizing", "仓位安排"), proposal.position_sizing),
     ):
-        shown = value if value is not None and value != "" else "not provided"
-        parts.extend(["", f"**{label}**: {shown}"])
+        shown = value if value is not None and value != "" else L("not provided", "未提供")
+        parts.extend(["", L(f"**{label}**: {shown}", f"**{label}**：{shown}")])
     # Derived, not asked for, so the rule above does not apply to these two: an
     # absent ratio means the levels it is computed from were not all given, and
     # the lines above already say which.
@@ -353,18 +384,19 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
     # check, rather than each computing their own.
     levels = proposal.levels()
     if levels["reward_risk"] is not None:
-        parts.extend(["", f"**Reward:Risk**: {levels['reward_risk']}:1"])
+        ratio = levels["reward_risk"]
+        parts.extend(["", L(f"**Reward:Risk**: {ratio}:1", f"**收益风险比**：{ratio}:1")])
     # Said out loud, because the alternative is worse than silence. An
     # inconsistent set of levels renders as perfectly plausible numbers -- a stop
     # above the entry on a Buy looks like a price -- and the ratio simply goes
     # missing, so a reader downstream has nothing to notice. Naming the problem is
     # what makes it reviewable.
     if levels["flags"]:
-        parts.extend(["", "**Level Warnings**: " + ", ".join(
-            _FLAG_TEXT.get(f, f) for f in levels["flags"])])
+        parts.extend(["", _level_warnings(levels["flags"], L)])
     parts.extend([
         "",
-        f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",
+        L(f"FINAL TRANSACTION PROPOSAL: **{action.upper()}**",
+          f"最终交易建议：**{L.term(action)}**"),
     ])
     return "\n".join(parts)
 
@@ -480,40 +512,45 @@ class PortfolioDecision(BaseModel):
         }
 
 
-def render_pm_decision(decision: PortfolioDecision) -> str:
+def render_pm_decision(decision: PortfolioDecision, language: str | None = None) -> str:
     """Render a PortfolioDecision back to the markdown shape the rest of the system expects.
 
     Memory log, CLI display, and saved report files all read this markdown,
     so the rendered output preserves the exact section headers (``**Rating**``,
     ``**Executive Summary**``, ``**Investment Thesis**``) that downstream
-    parsers and the report writers already handle.
+    parsers and the report writers already handle. A Chinese report writes
+    ``**评级**：减持``, which ``rating.extract_rating`` reads back as Underweight.
     """
+    L = for_language(language)
+    rating = decision.rating.value
     parts = [
-        f"**Rating**: {decision.rating.value}",
+        L(f"**Rating**: {rating}", f"**评级**：{L.term(rating)}"),
         "",
-        f"**Executive Summary**: {decision.executive_summary}",
+        L(f"**Executive Summary**: {decision.executive_summary}",
+          f"**执行摘要**：{decision.executive_summary}"),
         "",
-        f"**Investment Thesis**: {decision.investment_thesis}",
+        L(f"**Investment Thesis**: {decision.investment_thesis}",
+          f"**投资逻辑**：{decision.investment_thesis}"),
     ]
     # Named even when absent: a missing line reads as a field nobody asked for,
     # so a reader cannot tell "no target" from "target not reported". Upstream's
     # rule, applied to this fork's wider set of levels.
+    size = decision.position_size_pct
     for label, value in (
-        ("Position Size", None if decision.position_size_pct is None
-                          else f"{decision.position_size_pct}% of portfolio"),
-        ("Entry Price", decision.entry_price),
-        ("Stop Loss", decision.stop_loss),
-        ("Price Target", decision.price_target),
-        ("Time Horizon", decision.time_horizon),
+        (L("Position Size", "仓位规模"),
+         None if size is None else L(f"{size}% of portfolio", f"组合的 {size}%")),
+        (L("Entry Price", "入场价"), decision.entry_price),
+        (L("Stop Loss", "止损价"), decision.stop_loss),
+        (L("Price Target", "目标价"), decision.price_target),
+        (L("Time Horizon", "时间跨度"), decision.time_horizon),
     ):
-        shown = value if value is not None and value != "" else "not provided"
-        parts.extend(["", f"**{label}**: {shown}"])
+        shown = value if value is not None and value != "" else L("not provided", "未提供")
+        parts.extend(["", L(f"**{label}**: {shown}", f"**{label}**：{shown}")])
     # Derived rather than reported, so it is present only when there is something
     # to warn about.
     flags = decision.levels()["flags"]
     if flags:
-        parts.extend(["", "**Level Warnings**: " + ", ".join(
-            _FLAG_TEXT.get(f, f) for f in flags)])
+        parts.extend(["", _level_warnings(flags, L)])
     return "\n".join(parts)
 
 
@@ -592,17 +629,20 @@ class SentimentReport(BaseModel):
     )
 
 
-def render_sentiment_report(report: SentimentReport) -> str:
+def render_sentiment_report(report: SentimentReport, language: str | None = None) -> str:
     """Render a SentimentReport to the markdown shape the rest of the system expects.
 
     The structured header (band + score + confidence) is prepended to the
     narrative so the saved report is both human-readable and machine-parseable
     without regex.
     """
+    L = for_language(language)
+    band, score = report.overall_band.value, report.overall_score
     return "\n".join([
-        f"**Overall Sentiment:** **{report.overall_band.value}** "
-        f"(Score: {report.overall_score:.1f}/10)",
-        f"**Confidence:** {report.confidence.capitalize()}",
+        L(f"**Overall Sentiment:** **{band}** (Score: {score:.1f}/10)",
+          f"**整体情绪：** **{L.term(band)}**（评分：{score:.1f}/10）"),
+        L(f"**Confidence:** {report.confidence.capitalize()}",
+          f"**置信度：** {L.term(report.confidence)}"),
         "",
         report.narrative,
     ])
@@ -652,26 +692,32 @@ class EarningsNarrative(BaseModel):
         return value[:5]
 
 
-def render_earnings_narrative(narrative: EarningsNarrative) -> str:
+def _bullets(items: list[str], L) -> str:
+    return "\n".join(f"- {item}" for item in items) if items else L("- Unavailable", "- 暂无")
+
+
+def _narrative_confidence(confidence: str, L) -> str:
+    return L(f"**Narrative Confidence:** {confidence.capitalize()}",
+             f"**叙述置信度：** {L.term(confidence)}")
+
+
+def render_earnings_narrative(narrative: EarningsNarrative, language: str | None = None) -> str:
     """Render only qualitative fields; numeric evidence is rendered elsewhere."""
-
-    def bullets(items: list[str]) -> str:
-        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
-
+    L = for_language(language)
     return "\n".join([
-        "## Guidance & Management Commentary",
-        narrative.guidance_and_commentary or "Unavailable",
+        L("## Guidance & Management Commentary", "## 业绩指引与管理层评论"),
+        narrative.guidance_and_commentary or L("Unavailable", "暂无"),
         "",
-        "## Catalysts",
-        bullets(narrative.catalysts),
+        L("## Catalysts", "## 催化因素"),
+        _bullets(narrative.catalysts, L),
         "",
-        "## Risks",
-        bullets(narrative.risks),
+        L("## Risks", "## 风险"),
+        _bullets(narrative.risks, L),
         "",
-        "## Data Gaps",
-        bullets(narrative.data_gaps),
+        L("## Data Gaps", "## 数据缺口"),
+        _bullets(narrative.data_gaps, L),
         "",
-        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+        _narrative_confidence(narrative.confidence, L),
     ])
 
 
@@ -724,23 +770,20 @@ class QualityNarrative(BaseModel):
         return value[:5]
 
 
-def render_quality_narrative(narrative: QualityNarrative) -> str:
+def render_quality_narrative(narrative: QualityNarrative, language: str | None = None) -> str:
     """Render only qualitative fields; numeric evidence is rendered elsewhere."""
-
-    def bullets(items: list[str]) -> str:
-        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
-
+    L = for_language(language)
     return "\n".join([
-        "## Moat & Competitive Positioning",
-        narrative.moat_assessment or "Unavailable",
+        L("## Moat & Competitive Positioning", "## 护城河与竞争地位"),
+        narrative.moat_assessment or L("Unavailable", "暂无"),
         "",
-        "## Red Flags",
-        bullets(narrative.red_flags),
+        L("## Red Flags", "## 风险警示"),
+        _bullets(narrative.red_flags, L),
         "",
-        "## Data Gaps",
-        bullets(narrative.data_gaps),
+        L("## Data Gaps", "## 数据缺口"),
+        _bullets(narrative.data_gaps, L),
         "",
-        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+        _narrative_confidence(narrative.confidence, L),
     ])
 
 
@@ -787,22 +830,19 @@ class ValuationNarrative(BaseModel):
         return value[:5]
 
 
-def render_valuation_narrative(narrative: ValuationNarrative) -> str:
+def render_valuation_narrative(narrative: ValuationNarrative, language: str | None = None) -> str:
     """Render only qualitative fields; numeric evidence is rendered elsewhere."""
-
-    def bullets(items: list[str]) -> str:
-        return "\n".join(f"- {item}" for item in items) if items else "- Unavailable"
-
+    L = for_language(language)
     return "\n".join([
-        "## Valuation Thesis",
-        narrative.thesis or "Unavailable",
+        L("## Valuation Thesis", "## 估值逻辑"),
+        narrative.thesis or L("Unavailable", "暂无"),
         "",
-        "## Catalysts for Re-rating",
-        bullets(narrative.catalysts_for_rerating),
+        L("## Catalysts for Re-rating", "## 重估催化因素"),
+        _bullets(narrative.catalysts_for_rerating, L),
         "",
-        "## Data Gaps",
-        bullets(narrative.data_gaps),
+        L("## Data Gaps", "## 数据缺口"),
+        _bullets(narrative.data_gaps, L),
         "",
-        f"**Narrative Confidence:** {narrative.confidence.capitalize()}",
+        _narrative_confidence(narrative.confidence, L),
     ])
 

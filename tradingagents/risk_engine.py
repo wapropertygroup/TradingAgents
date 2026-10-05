@@ -68,6 +68,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping, Optional
 
+from tradingagents.report_language import for_language
+
 logger = logging.getLogger(__name__)
 
 #: The proposal is allowed exactly as stated.
@@ -407,6 +409,15 @@ COMPLIANCE_TEXT: dict[str, str] = {
         "the final decision's own numbers contradict each other"),
 }
 
+#: The same, for a Chinese report.
+COMPLIANCE_TEXT_ZH: dict[str, str] = {
+    "size_exceeds_approved": "最终仓位大于风控闸门批准的仓位",
+    "size_on_a_blocked_trade": "风控闸门已否决这笔交易，但最终决策仍给出了大于零的仓位",
+    "no_size_stated": "最终决策没有给出仓位，因此无法对照裁定核查",
+    "no_ruling": "没有可用的风控闸门裁定，因此仓位未对照任何上限核查",
+    "decision_levels_inconsistent": "最终决策自身的数字相互矛盾",
+}
+
 
 def check_compliance(pm_levels: Optional[Mapping[str, Any]],
                      gate: Optional[Mapping[str, Any]]) -> dict[str, Any]:
@@ -486,7 +497,7 @@ def _compliance(status: str, size: Optional[float], approved: Optional[float],
     }
 
 
-def render_compliance(result: Mapping[str, Any]) -> str:
+def render_compliance(result: Mapping[str, Any], language: str | None = None) -> str:
     """A violation notice for appending to a finished report, or "" when clean.
 
     Only a violation and an unverifiable result produce text. A compliant decision
@@ -503,25 +514,35 @@ def render_compliance(result: Mapping[str, Any]) -> str:
     # through unchanged.
     if status == COMPLY_UNVERIFIABLE and not result.get("ruling_was_binding"):
         return ""
-    reasons = [COMPLIANCE_TEXT.get(r, r) for r in (result.get("reasons") or [])]
+    # Appended to the Portfolio Manager's decision, so it is written in the
+    # report's language like the decision above it.
+    L = for_language(language)
+    texts = COMPLIANCE_TEXT_ZH if L.zh else COMPLIANCE_TEXT
+    reasons = [texts.get(r, r) for r in (result.get("reasons") or [])]
     if not reasons:
         return ""
-    head = ("**RISK GATE VIOLATION**" if result.get("violated")
-            else "**RISK GATE COMPLIANCE NOT VERIFIED**")
+    head = (L("**RISK GATE VIOLATION**", "**违反风控闸门裁定**") if result.get("violated")
+            else L("**RISK GATE COMPLIANCE NOT VERIFIED**", "**未能核实是否遵守风控闸门裁定**"))
     lines = ["", "---", "", head, ""]
     if result.get("final_size_pct") is not None:
-        lines.append(f"Final size stated: {result['final_size_pct']}% of portfolio")
+        size = result["final_size_pct"]
+        lines.append(L(f"Final size stated: {size}% of portfolio", f"最终仓位：组合的 {size}%"))
     if result.get("approved_size_pct") is not None:
-        lines.append(f"Size approved by the gate: {result['approved_size_pct']}%")
+        approved = result["approved_size_pct"]
+        lines.append(L(f"Size approved by the gate: {approved}%",
+                       f"风控闸门批准的仓位：{approved}%"))
     lines.append("")
     lines.extend(f"- {r}" for r in reasons)
     if result.get("violated"):
         lines.extend([
             "",
-            "This notice was computed after the decision was written and the "
-            "decision above has NOT been altered — a size corrected in the "
-            "structured field while the narrative still argued for the original "
-            "would be a report that contradicts itself, and a reader believes the "
-            "narrative. Treat the approved size as the operative one.",
+            L("This notice was computed after the decision was written and the "
+              "decision above has NOT been altered — a size corrected in the "
+              "structured field while the narrative still argued for the original "
+              "would be a report that contradicts itself, and a reader believes the "
+              "narrative. Treat the approved size as the operative one.",
+              "本提示是在决策写成之后计算的，上方的决策未作任何改动——若只修改结构化字段"
+              "中的仓位、而叙述仍在为原仓位辩护，报告就会自相矛盾，而读者会相信叙述。"
+              "请以批准的仓位为准。"),
         ])
     return "\n".join(lines)
