@@ -19,12 +19,23 @@ from tradingagents.agents.structured import (
 )
 from tradingagents.dataflows.a_stock import is_a_share
 
+# The board rules as TradingAgents-astock corrected them (2447782, 11045d6), as
+# of the 2026-07-06 change it tracks: ST/*ST no longer narrows the band, and the
+# Beijing Stock Exchange has its own limit, listing-day exception and lot rule.
 _A_SHARE_CONSTRAINTS = """
-For this mainland China A-share, obey market mechanics: T+1 settlement for
-shares bought today; board-specific daily price limits (normally 10%, 20% for
-STAR/ChiNext, 5% for ST names, subject to listing-day exceptions); orders in
-100-share lots except permitted odd-lot sales; Shanghai/Shenzhen trading
-sessions and auction windows; suspension/delisting risk; and margin eligibility.
+For this mainland China A-share, obey market mechanics:
+- T+1 settlement: shares bought today cannot be sold until the next trading day.
+- Daily price limits: main board ±10%, STAR/ChiNext ±20%, Beijing Stock Exchange
+  ±30%. ST/*ST does not narrow the band: main-board ST/*ST moved from ±5% to ±10%
+  on 2026-07-06, and STAR/ChiNext ST/*ST have always been ±20%.
+- A new listing has no price limit for its first 5 trading days (on the Beijing
+  Stock Exchange, its first day only).
+- Lots: 100-share multiples on the main board and ChiNext; on STAR 200 shares
+  minimum and on the Beijing Stock Exchange 100, then 1-share increments. Odd
+  lots may only be sold.
+- Sessions (Beijing time): call auction 09:15-09:25, continuous 09:30-11:30 and
+  13:00-14:57, closing auction 14:57-15:00, after-hours fixed-price 15:05-15:30.
+- Trading suspension and delisting risk, and margin eligibility.
 Do not invent an executable price or imply same-day round trips are available.
 """
 

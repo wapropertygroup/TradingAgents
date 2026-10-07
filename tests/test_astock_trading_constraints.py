@@ -21,6 +21,21 @@ class AStockTradingConstraintTests(unittest.TestCase):
         for term in ("T+1", "100-share", "price limit", "suspension"):
             self.assertIn(term, combined)
 
+    def test_the_board_rules_are_current(self):
+        """As TradingAgents-astock corrected them, as of the 2026-07-06 change:
+        the Beijing Stock Exchange has its own band, listing-day exception and
+        lot rule, and ST/*ST no longer narrows the band."""
+        for raw in (_A_SHARE_CONSTRAINTS, _A_SHARE_FINAL_CONSTRAINTS):
+            text = " ".join(raw.split())        # the prompt's line breaks carry nothing
+            with self.subTest(text=text[:40]):
+                self.assertIn("Beijing Stock Exchange ±30%", text)
+                self.assertIn("first 5 trading days", text)
+                self.assertIn("first day only" if raw is _A_SHARE_FINAL_CONSTRAINTS
+                              else "its first day only", text)
+                self.assertRegex(text, r"200 shares minimum on STAR|on STAR 200 shares minimum")
+                self.assertNotIn("5% for ST", text)
+                self.assertNotIn("5%/10%/20%", text)
+
 
 if __name__ == "__main__":
     unittest.main()

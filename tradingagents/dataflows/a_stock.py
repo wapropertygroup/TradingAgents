@@ -475,8 +475,13 @@ def get_fundamentals(symbol: str, curr_date: str | None = None) -> str:
         ("营收同比(%)", num("f184", 100)), ("净利润同比(%)", num("f185", 100)),
     ]
     body = "\n".join(f"| {k} | {'—' if v is None else v} |" for k, v in rows)
-    out = (f"## {code} {name} 基本面快照\n"
-           f"（数据源：东财 push2；as of {curr_date or 'today'}）\n\n"
+    # Both sources serve today's figures only. A past analysis date gets the
+    # look-ahead warning get_profit_forecast already gives, and the snapshot is
+    # not labelled as of that date, which it is not (TradingAgents-astock
+    # 5789834; this module had carried it for the forecast alone).
+    out = (_historical_notice(curr_date, "基本面快照与同花顺一致预期")
+           + f"## {code} {name} 基本面快照\n"
+           "（数据源：东财 push2 当前快照）\n\n"
            f"| 指标 | 数值 |\n| --- | --- |\n{body}\n")
     forecast = _eps_forecast_ths(code)
     if forecast:
@@ -802,7 +807,14 @@ def get_concept_blocks(ticker: str) -> str:
         "Referer": "https://gushitong.baidu.com/",
     })
     payload = json.loads(text)
-    groups = (payload.get("Result") or {}).get(code) or []
+    result = payload.get("Result") or {}
+    # Baidu's risk control answers a blocked request with {"ResultCode": 0 (an
+    # int, so the check below passes it), "Result": {"code": 403, "msg": "hit
+    # risk"}}. Read as "no blocks", a refusal becomes a false fact about the
+    # stock. From TradingAgents-astock a13f336.
+    if isinstance(result, dict) and result.get("code") == 403:
+        raise VendorUnavailableError(f"Baidu PAE blocked the request for {code} ({result.get('msg', 'hit risk')})")
+    groups = (result.get(code) or []) if isinstance(result, dict) else []
     if str(payload.get("ResultCode", -1)) != "0" or not groups:
         return f"NO_DATA_AVAILABLE: 百度股市通无 {code} 板块归属。"
     lines = [f"## {code} 所属板块（百度股市通）"]
@@ -834,13 +846,26 @@ def get_fund_flow(ticker: str, curr_date: str, include_history: bool = True) -> 
                     f"大单 {float(parts[4])/1e4:.0f} 万元；超大单 {float(parts[5])/1e4:.0f} 万元"
                 )
     if include_history:
+        # 东财 serves the last ``lmt`` sessions counted back from today, with no
+        # end date, so a fixed window can lie wholly after a past analysis date and
+        # the filter below leaves nothing: "no data" where the truth is "out of
+        # reach". The window grows with the gap, about 0.7 sessions per calendar
+        # day, up to 500 (some two years). From TradingAgents-astock eaf3876.
+        lmt = 60
+        if historical:
+            gap = (datetime.now().date()
+                   - datetime.strptime(str(curr_date)[:10], "%Y-%m-%d").date()).days
+            lmt = min(500, lmt + int(gap * 0.7))
         data = _em_json("https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get", {
-            "secid": _secid(code), "lmt": 60, "klt": 101,
+            "secid": _secid(code), "lmt": lmt, "klt": 101,
             "fields1": "f1,f2,f3,f7", "fields2": "f51,f52,f53,f54,f55,f56,f57",
         })
-        history = (data.get("data") or {}).get("klines") or []
+        served = (data.get("data") or {}).get("klines") or []
         cutoff = str(curr_date)[:10]
-        history = [row for row in history if not cutoff or row.split(",")[0] <= cutoff][-20:]
+        history = [row for row in served if not cutoff or row.split(",")[0] <= cutoff][-20:]
+        if historical and served and not history:
+            return (f"DATA_UNAVAILABLE: 东方财富资金流接口只提供从今天回溯的约 {lmt} 个交易日，"
+                    f"{cutoff} 已超出可回溯范围；这不代表 {code} 当时没有资金流。")
         lines.extend(f"- 日级：{row}" for row in history)
     if len(lines) == 1:
         return f"NO_DATA_AVAILABLE: 东方财富无 {code} 资金流数据。"

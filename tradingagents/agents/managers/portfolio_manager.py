@@ -24,10 +24,16 @@ from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.structured import NO_EXTERNAL_TOOLS, bind_structured, invoke_structured
 from tradingagents.dataflows.a_stock import is_a_share
 
+# The same board rules as the Trader's (trader._A_SHARE_CONSTRAINTS says where
+# they come from), in brief.
 _A_SHARE_FINAL_CONSTRAINTS = """
-This is a mainland China A-share. The final action must respect T+1, the
-applicable 5%/10%/20% daily price limit, 100-share buy lots, market sessions,
-suspension/delisting status, and margin eligibility. An unlock is potential
+This is a mainland China A-share. The final action must respect T+1; the daily
+price limit (main board ±10%, STAR/ChiNext ±20%, Beijing Stock Exchange ±30%,
+ST/*ST no narrower since 2026-07-06, and none in a new listing's first 5 trading
+days, its first day only on the Beijing Stock Exchange); lots (100-share
+multiples on the main board and ChiNext, 200 shares minimum on STAR and 100 on
+the Beijing Stock Exchange, then 1-share increments); market sessions;
+suspension/delisting status; and margin eligibility. An unlock is potential
 supply rather than proof of a sale. Do not state an executable price unless the
 provided evidence supports it.
 """
