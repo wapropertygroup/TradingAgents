@@ -179,7 +179,8 @@ and the valuation tier are already published in the report below and are \
 appended verbatim ahead of your text.
 2. **The valuation tier is `{L.term(evidence.tier.tier)}` and is final.** It was \
 computed from a weighted mean of the available signals (P/E band, PEG, \
-price-to-book, forward-vs-trailing P/E, dividend yield). You may explain it — \
+price-to-book, EV/EBIT, EV/Sales, forward-vs-trailing P/E, dividend yield). \
+EV/Sales is the one multiple a loss-making company still has. You may explain it — \
 including why a single headline multiple might look different from the tier — \
 but you may not upgrade, downgrade, or re-label it.
 3. **Never fill a gap by inference.** A missing trailing P/E is commonly a \

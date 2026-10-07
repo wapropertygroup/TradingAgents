@@ -15,6 +15,16 @@ already pricing in a change in earnings), and a minor Graham-era income tilt
 (dividend yield, weighted low so a zero-dividend grower is not punished for
 what it is).
 
+Two enterprise-value multiples joined on 2026-10-06. EV/EBIT is an earnings
+multiple that does not care how the company is financed: Greenblatt's earnings
+yield read the other way up, 8x being a 12.5% yield. EV/Sales is the one
+multiple a company with no profit still has, which is why it is weighted lower
+(a sales multiple says nothing about margins) and why it matters: a
+loss-maker's P/E is missing, and before it the tier rested on PEG and
+price-to-book alone. The adapter builds both on one currency basis and leaves
+them out for a bank or an insurer, whose debt is raw material rather than
+financing.
+
 **Locked constants, not a calibrated model** — same caveat as
 ``quality_models.py``: a first cut pinned by
 ``tests/test_valuation_models.py``, not tuned against realized outcomes.
@@ -64,11 +74,14 @@ ValuationTier = Literal[
 #: signal that adjusts for growth rather than taking the multiple at face
 #: value. Dividend yield is lightest and never penalizes a zero, so a
 #: zero-dividend grower is not marked down for a policy choice.
+#: EV/EBIT sits beside P/E as a second earnings multiple, and EV/Sales below it.
 VALUATION_WEIGHTS: dict[str, float] = {
-    "pe_band": 0.30,
-    "peg": 0.25,
-    "price_to_book": 0.20,
-    "forward_vs_trailing": 0.15,
+    "pe_band": 0.20,
+    "peg": 0.20,
+    "price_to_book": 0.15,
+    "ev_ebit": 0.15,
+    "ev_sales": 0.10,
+    "forward_vs_trailing": 0.10,
     "dividend_yield": 0.10,
 }
 
@@ -95,6 +108,18 @@ def _peg_score(v: float | None) -> float | None:
 def _price_to_book_score(v: float | None) -> float | None:
     # Graham's second lens.
     return piecewise_score(v, low=5.0, mid=3.0, high=1.5)
+
+
+def _ev_ebit_score(v: float | None) -> float | None:
+    # 8x (a 12.5% earnings yield on the whole enterprise) -> +1, 15x -> 0,
+    # 25x (a 4% yield) -> -1.
+    return piecewise_score(v, low=25.0, mid=15.0, high=8.0)
+
+
+def _ev_sales_score(v: float | None) -> float | None:
+    # 1x -> +1, 3x (about the broad US market's) -> 0, 8x -> -1. Absolute, as
+    # every band here is: a software company reads expensive on it by design.
+    return piecewise_score(v, low=8.0, mid=3.0, high=1.0)
 
 
 def _forward_vs_trailing_score(forward_pe: float | None, trailing_pe: float | None) -> float | None:
@@ -171,6 +196,8 @@ _MISSING_SIGNAL_GAPS = {
     "price_to_book": "Price-to-book unavailable",
     "forward_vs_trailing": "Forward P/E or trailing P/E unavailable, so the comparison could not be computed",
     "dividend_yield": "Dividend yield unavailable",
+    "ev_sales": "EV/Sales unavailable",
+    "ev_ebit": "EV/EBIT unavailable or undefined (an operating loss, or a bank or insurer)",
 }
 
 
@@ -180,17 +207,22 @@ def compute_valuation_tier(
     peg_ratio: float | None,
     price_to_book: float | None,
     dividend_yield_pct: float | None,
+    ev_to_sales: float | None = None,
+    ev_to_ebit: float | None = None,
 ) -> ValuationTierAssessment:
     """Score one snapshot's valuation and band it.
 
     Every argument is already unit-normalized (see module docstring):
     ``dividend_yield_pct`` is a decimal fraction (0.0238 = 2.38%), not
-    yfinance's raw percentage-point number.
+    yfinance's raw percentage-point number. The two EV multiples default to
+    absent, which renormalizes onto the other signals.
     """
     raw_signals: dict[str, float | None] = {
         "pe_band": _pe_band_score(trailing_pe),
         "peg": _peg_score(peg_ratio),
         "price_to_book": _price_to_book_score(price_to_book),
+        "ev_ebit": _ev_ebit_score(ev_to_ebit),
+        "ev_sales": _ev_sales_score(ev_to_sales),
         "forward_vs_trailing": _forward_vs_trailing_score(forward_pe, trailing_pe),
         "dividend_yield": _dividend_yield_score(dividend_yield_pct),
     }
@@ -225,6 +257,10 @@ class ValuationEvidence:
     price_to_book: Value = field(default_factory=lambda: Value.missing("not reported", unit="ratio"))
     dividend_yield: Value = field(default_factory=lambda: Value.missing("not reported", unit="pct_dec"))
     market_cap: Value = field(default_factory=lambda: Value.missing("not reported", unit="currency_large"))
+    enterprise_value: Value = field(
+        default_factory=lambda: Value.missing("not reported", unit="currency_large"))
+    ev_to_sales: Value = field(default_factory=lambda: Value.missing("not reported", unit="ratio"))
+    ev_to_ebit: Value = field(default_factory=lambda: Value.missing("not reported", unit="ratio"))
     tier: ValuationTierAssessment = field(
         default_factory=lambda: ValuationTierAssessment(tier="Insufficient Data", score=None)
     )
@@ -252,6 +288,8 @@ class ValuationEvidence:
             "trailing_pe": self.trailing_pe.to_dict(), "forward_pe": self.forward_pe.to_dict(),
             "peg_ratio": self.peg_ratio.to_dict(), "price_to_book": self.price_to_book.to_dict(),
             "dividend_yield": self.dividend_yield.to_dict(), "market_cap": self.market_cap.to_dict(),
+            "enterprise_value": self.enterprise_value.to_dict(),
+            "ev_to_sales": self.ev_to_sales.to_dict(), "ev_to_ebit": self.ev_to_ebit.to_dict(),
             "tier": self.tier.to_dict(),
             "sources": list(self.sources), "data_gaps": list(self.data_gaps),
             "warnings": list(self.warnings),
@@ -273,6 +311,14 @@ class ValuationEvidence:
             price_to_book=Value.from_dict(raw.get("price_to_book")),
             dividend_yield=Value.from_dict(raw.get("dividend_yield")),
             market_cap=Value.from_dict(raw.get("market_cap")),
+            # Absent from a payload written before 2026-10-06, which reads back
+            # as missing rather than failing.
+            enterprise_value=Value.from_dict(raw["enterprise_value"]) if "enterprise_value" in raw
+            else Value.missing("not reported", unit="currency_large"),
+            ev_to_sales=Value.from_dict(raw["ev_to_sales"]) if "ev_to_sales" in raw
+            else Value.missing("not reported", unit="ratio"),
+            ev_to_ebit=Value.from_dict(raw["ev_to_ebit"]) if "ev_to_ebit" in raw
+            else Value.missing("not reported", unit="ratio"),
             tier=ValuationTierAssessment.from_dict(raw.get("tier")),
             sources=[str(s) for s in (raw.get("sources") or [])],
             data_gaps=[str(s) for s in (raw.get("data_gaps") or [])],
@@ -292,6 +338,8 @@ def finalize_evidence(evidence: ValuationEvidence) -> ValuationEvidence:
         peg_ratio=evidence.peg_ratio.value,
         price_to_book=evidence.price_to_book.value,
         dividend_yield_pct=evidence.dividend_yield.value,
+        ev_to_sales=evidence.ev_to_sales.value,
+        ev_to_ebit=evidence.ev_to_ebit.value,
     )
     gaps = list(evidence.data_gaps)
     for name in tier.missing_signals:
@@ -358,7 +406,11 @@ def render_valuation_report(evidence: ValuationEvidence, language: str | None = 
         L(f"- PEG ratio: {L.fmt(e.peg_ratio)}", f"- PEG 比率：{L.fmt(e.peg_ratio)}"),
         L(f"- Price to book: {L.fmt(e.price_to_book)}", f"- 市净率：{L.fmt(e.price_to_book)}"),
         L(f"- Dividend yield: {L.fmt(e.dividend_yield)}", f"- 股息率：{L.fmt(e.dividend_yield)}"),
+        L(f"- EV/Sales: {L.fmt(e.ev_to_sales)}", f"- 企业价值/营收：{L.fmt(e.ev_to_sales)}"),
+        L(f"- EV/EBIT: {L.fmt(e.ev_to_ebit)}", f"- 企业价值/EBIT：{L.fmt(e.ev_to_ebit)}"),
         L(f"- Market cap: {L.fmt(e.market_cap)}", f"- 市值：{L.fmt(e.market_cap)}"),
+        L(f"- Enterprise value: {L.fmt(e.enterprise_value)}",
+          f"- 企业价值：{L.fmt(e.enterprise_value)}"),
     ]
 
     lines += ["", render_sources_section(e.sources, e.data_gaps, e.warnings, L)]

@@ -136,6 +136,8 @@ _SIGNALS_ZH: dict[str, str] = {
     "price_to_book": "市净率",
     "forward_vs_trailing": "远期与历史市盈率对比",
     "dividend_yield": "股息率",
+    "ev_ebit": "企业价值/EBIT",
+    "ev_sales": "企业价值/营收",
 }
 
 #: Source labels the adapters write, where they carry English description.
@@ -267,6 +269,19 @@ _MESSAGES_ZH: dict[str, str] = {
     "computed":
         "远期或历史市盈率不可用，因此无法比较二者",
     "Dividend yield unavailable": "股息率不可用",
+    "EV/Sales unavailable": "企业价值/营收不可用",
+    "EV/EBIT unavailable or undefined (an operating loss, or a bank or insurer)":
+        "企业价值/EBIT 不可用或无定义（营业亏损，或为银行、保险公司）",
+    "listing and statements in different currencies, and the exchange rate could not be read":
+        "报价货币与财报货币不同，且无法读取汇率",
+    "EV multiples do not describe a bank or an insurer: its debt is raw material, not "
+    "financing":
+        "企业价值倍数不适用于银行或保险公司：其负债是经营原料，而非融资",
+    "enterprise value at or below zero -- no EV multiple exists to score":
+        "企业价值为零或负——不存在可评分的企业价值倍数",
+    "operating loss -- no EV/EBIT multiple exists to score":
+        "营业亏损——不存在可评分的企业价值/EBIT 倍数",
+    "no cost of goods reported (a bank or insurer)": "未报告销售成本（银行或保险公司）",
     # a_stock_earnings.py
     "announcement dates are unavailable from this source, and drift anchored to "
     "anything else would misdate the market reaction":

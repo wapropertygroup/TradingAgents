@@ -27,6 +27,16 @@ see ``quality_models.py``/``valuation_models.py`` module docstrings):
 * A negative or missing trailing P/E is reported *missing*, not passed
   through as a negative signal value — see ``valuation_models``'s module
   docstring for why.
+
+And one currency trap. ``marketCap``, prices and Yahoo's own
+``enterpriseValue`` are in the listing's ``currency``; ``totalRevenue``,
+``totalDebt``, ``totalCash`` and ``freeCashflow`` are in ``financialCurrency``.
+For an ADR the two differ and Yahoo's EV ratios divide one by the other: on
+2026-10-06 ASML read EV/Revenue 1,123 and TSM's EV was neither a dollar nor a
+TWD figure. :func:`_enterprise_values` rebuilds EV from parts it can convert
+(the cap, plus debt less cash at the pair's rate) and keeps Yahoo's EV only
+where the currencies agree, exactly as ystocker's ``data.statement_metrics``
+does, so the report and the site quote one number.
 """
 
 from __future__ import annotations
@@ -151,6 +161,91 @@ def _margin_history(ticker: yf.Ticker) -> tuple[list[Value], list[str]]:
     return values, periods
 
 
+#: Industries whose debt is raw material rather than financing (deposits,
+#: float, client money), so EV does not measure what an EV multiple assumes.
+#: The same three ystocker's DCA engine sends to its bank template.
+_EV_UNDEFINED_INDUSTRIES = ("bank", "insurance", "capital markets")
+
+
+@lru_cache(maxsize=16)
+def _fx_rate(from_ccy: str, to_ccy: str) -> float | None:
+    """Units of ``to_ccy`` per one ``from_ccy``, from Yahoo's pair, or None."""
+    if from_ccy == to_ccy:
+        return 1.0
+    try:
+        info = yf.Ticker(f"{from_ccy}{to_ccy}=X").info or {}
+    except Exception as exc:  # noqa: BLE001 - a missing rate costs the EV multiples only
+        logger.info("FX %s->%s unavailable: %s", from_ccy, to_ccy, exc)
+        return None
+    rate = safe_float(info.get("regularMarketPrice") or info.get("previousClose"))
+    return rate if rate is not None and rate > 0 else None
+
+
+def _enterprise_values(info: dict[str, Any], as_of: str) -> tuple[Value, Value, Value]:
+    """``(enterprise value, EV/Sales, EV/EBIT)`` on one currency basis.
+
+    EV is in the listing's currency. EBIT is operating income
+    (``operatingMargins`` x revenue), the usual proxy where no EBIT line is
+    published; at or below zero there is no EV/EBIT.
+    """
+    quote = (info.get("currency") or "").strip().upper() or None
+    fin = (info.get("financialCurrency") or "").strip().upper() or quote
+
+    def ratio_missing(reason: str) -> Value:
+        return Value.missing(reason, unit="ratio", source=SOURCE)
+
+    rate = 1.0 if fin == quote else (_fx_rate(fin, quote) if fin and quote else None)
+    if rate is None:
+        reason = ("listing and statements in different currencies, and the exchange "
+                  "rate could not be read")
+        return (Value.missing(reason, unit="currency_large", source=SOURCE),
+                ratio_missing(reason), ratio_missing(reason))
+
+    cap = safe_float(info.get("marketCap"))
+    revenue = safe_float(info.get("totalRevenue"))
+    operating = safe_float(info.get("operatingMargins"))
+    if fin == quote:
+        ev = safe_float(info.get("enterpriseValue"))
+    else:
+        debt, cash = safe_float(info.get("totalDebt")), safe_float(info.get("totalCash"))
+        ev = cap + (debt - cash) * rate if None not in (cap, debt, cash) else None
+    ev_value = (Value(value=ev, unit="currency_large", currency=quote, source=SOURCE, as_of=as_of)
+                if ev is not None else
+                Value.missing("not reported by Yahoo Finance", unit="currency_large", source=SOURCE))
+
+    industry = str(info.get("industry") or "").lower()
+    if any(word in industry for word in _EV_UNDEFINED_INDUSTRIES):
+        reason = ("EV multiples do not describe a bank or an insurer: its debt is raw "
+                  "material, not financing")
+        return ev_value, ratio_missing(reason), ratio_missing(reason)
+    if ev is None or ev <= 0:
+        reason = ("not reported by Yahoo Finance" if ev is None
+                  else "enterprise value at or below zero -- no EV multiple exists to score")
+        return ev_value, ratio_missing(reason), ratio_missing(reason)
+
+    revenue_q = revenue * rate if revenue is not None else None
+    if revenue_q is None or revenue_q <= 0:
+        sales = ratio_missing("not reported by Yahoo Finance")
+    else:
+        sales = Value(value=ev / revenue_q, unit="ratio", source=SOURCE, as_of=as_of)
+    if revenue_q is None or operating is None:
+        ebit = ratio_missing("not reported by Yahoo Finance")
+    elif operating <= 0 or revenue_q <= 0:
+        ebit = ratio_missing("operating loss -- no EV/EBIT multiple exists to score")
+    else:
+        ebit = Value(value=ev / (operating * revenue_q), unit="ratio", source=SOURCE, as_of=as_of)
+    return ev_value, sales, ebit
+
+
+def _gross_margin(raw: Any, as_of: str) -> Value:
+    """Gross margin, with Yahoo's 0.0 for a bank (no cost of goods) as missing."""
+    number = safe_float(raw)
+    if number == 0.0:
+        return Value.missing("no cost of goods reported (a bank or insurer)",
+                             unit="pct_dec", source=SOURCE)
+    return _value(raw, unit="pct_dec", as_of=as_of)
+
+
 def _unsupported_reason(quote_type: str, canonical: str) -> str:
     return (
         f"{canonical} is a {quote_type.lower()}, not an operating company, so "
@@ -241,6 +336,8 @@ def build_quality_evidence(symbol: str, curr_date: str | None = None) -> Quality
         current_ratio=_value(info.get("currentRatio"), unit="ratio", as_of=as_of),
         free_cash_flow=_value(fcf, unit="currency_large", currency=currency, as_of=as_of),
         total_revenue=_value(revenue, unit="currency_large", currency=currency, as_of=as_of),
+        gross_margin=_gross_margin(info.get("grossMargins"), as_of),
+        revenue_growth=_value(info.get("revenueGrowth"), unit="pct_dec", as_of=as_of),
         margin_history=margin_history,
         margin_history_periods=margin_periods,
         sources=[SOURCE],
@@ -285,6 +382,7 @@ def build_valuation_evidence(symbol: str, curr_date: str | None = None) -> Valua
             "price-to-book for it.",
         )
 
+    enterprise_value, ev_to_sales, ev_to_ebit = _enterprise_values(info, as_of)
     evidence = ValuationEvidence(
         symbol=symbol, as_of=as_of, company_name=info.get("longName") or info.get("shortName"),
         currency=currency,
@@ -297,7 +395,13 @@ def build_valuation_evidence(symbol: str, curr_date: str | None = None) -> Valua
         # the margin fields above, in the same .info dict. /100 makes it a
         # decimal fraction, consistent with every other pct_dec Value here.
         dividend_yield=_value(info.get("dividendYield"), unit="pct_dec", as_of=as_of, scale=100.0),
-        market_cap=_value(info.get("marketCap"), unit="currency_large", currency=currency, as_of=as_of),
+        # In the listing's currency, which is where Yahoo quotes a cap: TSM's is
+        # dollars, and labelling it with the TWD statements' currency was wrong.
+        market_cap=_value(info.get("marketCap"), unit="currency_large",
+                          currency=info.get("currency") or currency, as_of=as_of),
+        enterprise_value=enterprise_value,
+        ev_to_sales=ev_to_sales,
+        ev_to_ebit=ev_to_ebit,
         sources=[SOURCE],
     )
     return finalize_valuation(evidence)

@@ -75,7 +75,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # text writes in Latin letters, vendor and endpoint names, the ticker and
 # currency of the fixtures, and the symmetric-change formula's variables.
 _ALLOWED_LATIN = {
-    "EPS", "PEG", "ETF", "USD",
+    "EPS", "PEG", "ETF", "USD", "EBIT",
     "Alpha", "Vantage", "EARNINGS", "EARNINGS_ESTIMATES", "EARNINGS_CALENDAR",
     "yfinance", "Yahoo", "Finance", "jqka",
     "INTC", "US", "SPY", "XYZ",

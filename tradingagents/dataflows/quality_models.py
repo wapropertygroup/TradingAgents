@@ -256,6 +256,9 @@ class QualityEvidence:
     current_ratio: Value = field(default_factory=lambda: Value.missing("not reported", unit="ratio"))
     free_cash_flow: Value = field(default_factory=lambda: Value.missing("not reported", unit="currency_large"))
     total_revenue: Value = field(default_factory=lambda: Value.missing("not reported", unit="currency_large"))
+    # Shown, not scored (2026-10-06): the tier's six signals are unchanged.
+    gross_margin: Value = field(default_factory=lambda: Value.missing("not reported", unit="pct_dec"))
+    revenue_growth: Value = field(default_factory=lambda: Value.missing("not reported", unit="pct_dec"))
     margin_history: list[Value] = field(default_factory=list)  # most-recent-first
     margin_history_periods: list[str] = field(default_factory=list)
     tier: QualityTierAssessment = field(
@@ -294,6 +297,8 @@ class QualityEvidence:
             "current_ratio": self.current_ratio.to_dict(),
             "free_cash_flow": self.free_cash_flow.to_dict(),
             "total_revenue": self.total_revenue.to_dict(),
+            "gross_margin": self.gross_margin.to_dict(),
+            "revenue_growth": self.revenue_growth.to_dict(),
             "margin_history": [v.to_dict() for v in self.margin_history],
             "margin_history_periods": list(self.margin_history_periods),
             "tier": self.tier.to_dict(),
@@ -319,6 +324,10 @@ class QualityEvidence:
             current_ratio=Value.from_dict(raw.get("current_ratio")),
             free_cash_flow=Value.from_dict(raw.get("free_cash_flow")),
             total_revenue=Value.from_dict(raw.get("total_revenue")),
+            gross_margin=Value.from_dict(raw["gross_margin"]) if "gross_margin" in raw
+            else Value.missing("not reported", unit="pct_dec"),
+            revenue_growth=Value.from_dict(raw["revenue_growth"]) if "revenue_growth" in raw
+            else Value.missing("not reported", unit="pct_dec"),
             margin_history=[Value.from_dict(v) for v in (raw.get("margin_history") or [])],
             margin_history_periods=[str(p) for p in (raw.get("margin_history_periods") or [])],
             tier=QualityTierAssessment.from_dict(raw.get("tier")),
@@ -407,6 +416,9 @@ def render_quality_report(evidence: QualityEvidence, language: str | None = None
         "",
         L(f"- Return on equity: {L.fmt(e.return_on_equity)}",
           f"- 净资产收益率：{L.fmt(e.return_on_equity)}"),
+        L(f"- Revenue growth (YoY): {L.fmt(e.revenue_growth)}",
+          f"- 营收增速（同比）：{L.fmt(e.revenue_growth)}"),
+        L(f"- Gross margin: {L.fmt(e.gross_margin)}", f"- 毛利率：{L.fmt(e.gross_margin)}"),
         L(f"- Operating margin: {L.fmt(e.operating_margin)}",
           f"- 营业利润率：{L.fmt(e.operating_margin)}"),
         L(f"- Profit margin: {L.fmt(e.profit_margin)}", f"- 净利润率：{L.fmt(e.profit_margin)}"),

@@ -121,6 +121,52 @@ class ComputeValuationTierTests(unittest.TestCase):
         self.assertAlmostEqual(result.score, recomputed, places=9)
 
 
+class EnterpriseValueSignalTests(unittest.TestCase):
+    """EV/EBIT and EV/Sales, scored on absolute bands (2026-10-06)."""
+
+    def test_the_bands(self):
+        def signal(name, **kw):
+            args = dict(trailing_pe=None, forward_pe=None, peg_ratio=None,
+                        price_to_book=None, dividend_yield_pct=None)
+            args.update(kw)
+            return compute_valuation_tier(**args).signals.get(name)
+        self.assertEqual(signal("ev_ebit", ev_to_ebit=8.0), 1.0)
+        self.assertEqual(signal("ev_ebit", ev_to_ebit=15.0), 0.0)
+        self.assertEqual(signal("ev_ebit", ev_to_ebit=25.0), -1.0)
+        self.assertEqual(signal("ev_sales", ev_to_sales=1.0), 1.0)
+        self.assertEqual(signal("ev_sales", ev_to_sales=3.0), 0.0)
+        self.assertEqual(signal("ev_sales", ev_to_sales=8.0), -1.0)
+
+    def test_a_loss_maker_scores_on_ev_sales_where_it_has_no_pe(self):
+        """INTC on 2026-10-06: no trailing P/E, so before the EV multiples the
+        tier rested on PEG, price-to-book and dividend yield (0.55 of weight)."""
+        result = compute_valuation_tier(
+            trailing_pe=None, forward_pe=56.33, peg_ratio=1.36, price_to_book=6.693,
+            dividend_yield_pct=0.0, ev_to_sales=10.91, ev_to_ebit=89.5,
+        )
+        self.assertAlmostEqual(result.available_weight, 0.70)
+        self.assertEqual(result.signals["ev_sales"], -1.0)
+        self.assertEqual(result.tier, "Expensive")
+
+    def test_the_ev_multiples_default_to_absent(self):
+        result = compute_valuation_tier(
+            trailing_pe=18.0, forward_pe=16.0, peg_ratio=1.2,
+            price_to_book=2.5, dividend_yield_pct=0.015,
+        )
+        self.assertNotIn("ev_ebit", result.signals)
+        self.assertIn("ev_sales", result.missing_signals)
+
+    def test_a_payload_from_before_reads_back_with_them_missing(self):
+        evidence = ValuationEvidence(symbol="AAPL", as_of="2026-10-05",
+                                     trailing_pe=Value(36.6, unit="ratio"))
+        raw = evidence.to_dict()
+        for key in ("enterprise_value", "ev_to_sales", "ev_to_ebit"):
+            raw.pop(key)
+        restored = ValuationEvidence.from_dict(raw)
+        self.assertFalse(restored.ev_to_sales.available)
+        self.assertEqual(restored.ev_to_sales.unavailable_reason, "not reported")
+
+
 class ValuationTierAssessmentSerializationTests(unittest.TestCase):
     def test_round_trip(self):
         original = ValuationTierAssessment(
@@ -149,6 +195,10 @@ class ValuationEvidenceTests(unittest.TestCase):
             price_to_book=Value(43.44, unit="ratio"),
             dividend_yield=Value(0.0034, unit="pct_dec"),
             market_cap=Value(4.67e12, unit="currency_large", currency="USD"),
+            # AAPL as Yahoo served it on 2026-10-06.
+            enterprise_value=Value(4.88e12, unit="currency_large", currency="USD"),
+            ev_to_sales=Value(10.45, unit="ratio"),
+            ev_to_ebit=Value(32.0, unit="ratio"),
             sources=["yfinance (Yahoo Finance fundamentals)"],
         )
         base.update(overrides)
