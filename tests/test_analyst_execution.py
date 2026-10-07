@@ -11,8 +11,8 @@ class AnalystExecutionPlanTests(unittest.TestCase):
 
         self.assertEqual([spec.key for spec in plan.specs], ["news", "market"])
         self.assertEqual(plan.specs[0].agent_node, "News Analyst")
-        self.assertEqual(plan.specs[0].tool_node, "tools_news")
-        self.assertEqual(plan.specs[0].clear_node, "Msg Clear News")
+        self.assertEqual(plan.specs[0].report_key, "news_report")
+        self.assertFalse(hasattr(plan.specs[0], "clear_node"))
 
     def test_rejects_unknown_analyst_keys(self):
         with self.assertRaises(ValueError):
@@ -48,9 +48,11 @@ class AnalystExecutionPlanTests(unittest.TestCase):
         spec = build_analyst_execution_plan(["earnings"]).specs[0]
         self.assertEqual(spec.key, "earnings")
         self.assertEqual(spec.agent_node, "Earnings Analyst")
-        self.assertEqual(spec.clear_node, "Msg Clear Earnings")
-        self.assertEqual(spec.tool_node, "tools_earnings")
         self.assertEqual(spec.report_key, "earnings_report")
+        # Each analyst is a subgraph with its own tools and messages since the
+        # analysts run side by side, so no clear or tool node is named here.
+        self.assertFalse(hasattr(spec, "clear_node"))
+        self.assertFalse(hasattr(spec, "tool_node"))
 
     def test_earnings_can_be_selected_in_any_position(self):
         for keys in (

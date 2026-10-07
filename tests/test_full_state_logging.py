@@ -57,6 +57,9 @@ class FullStateLoggingTests(unittest.TestCase):
         # Build the object without touching LLM providers or the network.
         self.graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
         self.graph.config = {"results_dir": str(self.results_dir)}
+        # The log records what produced the run (run_settings), which reads the
+        # roster __init__ would have set.
+        self.graph.selected_analysts = ("market", "social", "news", "fundamentals")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -109,10 +112,12 @@ class FullStateLoggingTests(unittest.TestCase):
     def test_the_decision_chain_is_preserved(self):
         logged = self._log(_final_state())
         self.assertEqual(logged["investment_plan"], "INVESTMENT_PLAN")
-        self.assertEqual(logged["trader_investment_decision"], "TRADER_PLAN")
+        # One name per decision (upstream cf960d6): the Trader's is logged under
+        # its state key, and the debates no longer carry a judge_decision.
+        self.assertEqual(logged["trader_investment_plan"], "TRADER_PLAN")
         self.assertEqual(logged["final_trade_decision"], "FINAL")
         self.assertEqual(logged["investment_debate_state"]["bull_history"], "BULL")
-        self.assertEqual(logged["risk_debate_state"]["judge_decision"], "PM_DECISION")
+        self.assertNotIn("judge_decision", logged["risk_debate_state"])
 
     def test_the_log_is_valid_utf8_json_for_non_ascii_report_content(self):
         state = _final_state(policy_report="政策收紧，估值承压")
@@ -158,7 +163,17 @@ def _built_workflow(selected):
     from tradingagents.graph.conditional_logic import ConditionalLogic
     from tradingagents.graph.setup import GraphSetup
 
-    return GraphSetup(MagicMock(), MagicMock(), ConditionalLogic()).setup_graph(tuple(selected))
+    return GraphSetup(MagicMock(), MagicMock(), ConditionalLogic(), max_tool_rounds=20).setup_graph(tuple(selected))
+
+
+def _analyst_tool_node(workflow, spec):
+    """The ToolNode inside an analyst's own graph, or None when it has no tools.
+
+    The analysts run side by side, each as a graph of its own with a private
+    message history, so its tools live in that graph rather than beside it.
+    """
+    node = workflow.nodes[spec.agent_node].runnable.builder.nodes.get("tools")
+    return node.runnable if node is not None else None
 
 
 class ToolNodeRegistrationTests(unittest.TestCase):
@@ -173,7 +188,9 @@ class ToolNodeRegistrationTests(unittest.TestCase):
             EVIDENCE_TOOL,
         )
 
-        node = _built_workflow(["earnings"]).nodes["tools_earnings"].runnable
+        from tradingagents.graph.analyst_execution import ANALYST_NODE_SPECS
+
+        node = _analyst_tool_node(_built_workflow(["earnings"]), ANALYST_NODE_SPECS["earnings"])
         self.assertEqual(set(node.tools_by_name), {EVIDENCE_TOOL, COMMENTARY_TOOL})
 
     def test_every_analyst_with_tools_gets_a_tool_node_holding_exactly_them(self):
@@ -185,10 +202,10 @@ class ToolNodeRegistrationTests(unittest.TestCase):
         workflow = _built_workflow(ANALYST_NODE_SPECS)
         for key, spec in ANALYST_NODE_SPECS.items():
             with self.subTest(analyst=key):
+                node = _analyst_tool_node(workflow, spec)
                 if not spec.tools:
-                    self.assertIsNone(spec.tool_node)
+                    self.assertIsNone(node)
                     continue
-                node = workflow.nodes[spec.tool_node].runnable
                 self.assertEqual(set(node.tools_by_name), {t.name for t in spec.tools})
 
 

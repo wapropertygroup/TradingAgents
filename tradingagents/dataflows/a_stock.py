@@ -48,7 +48,7 @@ from typing import Any, Optional
 import pandas as pd
 import requests
 
-from .errors import NoMarketDataError, VendorRateLimitError
+from .errors import NoMarketDataError, VendorUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def _http(url: str, *, params: dict | None = None, encoding: str | None = None,
           headers: dict | None = None) -> str:
     """GET with backoff, returning text.
 
-    Raises VendorRateLimitError when the host keeps hanging up, so the router can
+    Raises VendorUnavailableError when the host keeps hanging up, so the router can
     try another vendor instead of surfacing a stack trace: 东财 signals overload
     by dropping the connection rather than by returning 429.
     """
@@ -155,18 +155,18 @@ def _http(url: str, *, params: dict | None = None, encoding: str | None = None,
                 resp = requests.get(url, params=params, timeout=_TIMEOUT,
                                     headers=headers or _EM_HEADERS)
             if resp.status_code == 429:
-                raise VendorRateLimitError(f"{url} returned 429")
+                raise VendorUnavailableError(f"{url} returned 429")
             resp.raise_for_status()
             if encoding:
                 resp.encoding = encoding
             return resp.text
-        except VendorRateLimitError:
+        except VendorUnavailableError:
             raise
         except Exception as exc:  # noqa: BLE001 - retried, then reported
             last = exc
             if attempt < _RETRIES - 1:
                 time.sleep(1.5 * (attempt + 1))
-    raise VendorRateLimitError(f"{url} unreachable after {_RETRIES} tries: {last}")
+    raise VendorUnavailableError(f"{url} unreachable after {_RETRIES} tries: {last}")
 
 
 def _em_json(url: str, params: dict) -> dict:
@@ -176,7 +176,7 @@ def _em_json(url: str, params: dict) -> dict:
     try:
         return json.loads(text)
     except ValueError as exc:
-        raise VendorRateLimitError(f"non-JSON from {url}: {exc}") from exc
+        raise VendorUnavailableError(f"non-JSON from {url}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +330,7 @@ def load_ohlcv(symbol: str, curr_date: str | None = None) -> pd.DataFrame:
         try:
             df = _clean_ohlcv(_fetch_kline_em(code))
             source = "eastmoney"
-        except (VendorRateLimitError, NoMarketDataError) as em_exc:
+        except (VendorUnavailableError, NoMarketDataError) as em_exc:
             logger.warning("a_stock: 东财 kline failed for %s (%s); trying 新浪", code, em_exc)
             df = _clean_ohlcv(_fetch_kline_sina(code))
             source = "sina"

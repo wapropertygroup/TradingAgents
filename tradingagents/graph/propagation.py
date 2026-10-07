@@ -53,6 +53,7 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
+            "memory_note": "",
             "portfolio_context": portfolio_context,
             "portfolio_data": dict(portfolio_data or {}),
             "market_context": market_context,
@@ -66,7 +67,6 @@ class Propagator:
                     "bear_history": "",
                     "history": "",
                     "current_response": "",
-                    "judge_decision": "",
                     "count": 0,
                 }
             ),
@@ -80,7 +80,6 @@ class Propagator:
                     "current_aggressive_response": "",
                     "current_conservative_response": "",
                     "current_neutral_response": "",
-                    "judge_decision": "",
                     "count": 0,
                 }
             ),

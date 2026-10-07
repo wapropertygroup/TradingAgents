@@ -8,7 +8,6 @@ from .analysts.policy_analyst import create_policy_analyst
 from .analysts.hot_money_tracker import create_hot_money_tracker
 from .analysts.lockup_watcher import create_lockup_watcher
 from .analysts.sentiment_analyst import create_sentiment_analyst
-from .context import create_msg_delete
 from .managers.portfolio_manager import create_portfolio_manager
 from .managers.research_manager import create_research_manager
 from .researchers.bear_researcher import create_bear_researcher
@@ -21,7 +20,6 @@ from .trader.trader import create_trader
 
 __all__ = [
     "AgentState",
-    "create_msg_delete",
     "InvestDebateState",
     "RiskDebateState",
     "create_bear_researcher",

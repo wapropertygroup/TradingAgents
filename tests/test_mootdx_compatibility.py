@@ -37,7 +37,7 @@ class MootdxCompatibilityTests(unittest.TestCase):
     def test_eastmoney_rate_limit_reaches_sina(self):
         with patch.dict(os.environ, {"TRADINGAGENTS_MOOTDX_ENABLED": "0"}), \
              patch.object(a_stock, "_fetch_kline_em",
-                          side_effect=a_stock.VendorRateLimitError("429")), \
+                          side_effect=a_stock.VendorUnavailableError("429")), \
              patch.object(a_stock, "_fetch_kline_sina", return_value=_frame()):
             result = a_stock.load_ohlcv("600519", "2026-08-25")
         self.assertEqual(result.attrs["source"], "sina")

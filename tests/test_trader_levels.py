@@ -254,31 +254,27 @@ class _StubPlain:
         return _R()
 
 
-def test_invoke_structured_returns_both_markdown_and_object():
+def test_invoke_structured_returns_the_parsed_object():
+    # Upstream's contract (v0.6.0): the object, not its markdown, so the typed
+    # levels are kept rather than re-parsed out of prose. The caller renders it.
     proposal = _prop(entry_price=100.0, stop_loss=95.0)
-    text, obj = invoke_structured(_StubStructured(proposal), _StubPlain(),
-                                  "p", render_trader_proposal, "Trader")
-    assert "**Entry Price**: 100.0" in text
+    obj = invoke_structured(_StubStructured(proposal), "p", "Trader")
     assert obj is proposal
+    assert "**Entry Price**: 100.0" in render_trader_proposal(obj)
 
 
-def test_free_text_path_returns_none_for_the_object():
-    # There are no numbers on that path. A caller must read None as unstated.
-    text, obj = invoke_structured(None, _StubPlain(), "p",
-                                  render_trader_proposal, "Trader")
-    assert text == "free text answer"
-    assert obj is None
+def test_no_structured_model_returns_none_for_the_object():
+    # There are no numbers on the free-text path. A caller must read None as
+    # unstated, and take its own free-text answer.
+    assert invoke_structured(None, "p", "Trader") is None
 
 
-def test_a_structured_failure_falls_back_and_returns_none():
+def test_a_structured_failure_returns_none():
     class _Boom:
         def invoke(self, _p):
             raise ValueError("malformed")
 
-    text, obj = invoke_structured(_Boom(), _StubPlain(), "p",
-                                  render_trader_proposal, "Trader")
-    assert text == "free text answer"
-    assert obj is None
+    assert invoke_structured(_Boom(), "p", "Trader") is None
 
 
 def test_the_old_helper_still_returns_just_a_string():

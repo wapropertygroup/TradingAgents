@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import router as I
-from tradingagents.dataflows.a_stock import NoMarketDataError, VendorRateLimitError
+from tradingagents.dataflows.a_stock import NoMarketDataError, VendorUnavailableError
 from tradingagents.dataflows.config import set_config
 
 
@@ -82,7 +82,7 @@ class SignalToolThrottleTests(unittest.TestCase):
             with self.subTest(method=method):
                 with patch.dict(
                     I.VENDOR_METHODS[method],
-                    {"a_stock": _raising(VendorRateLimitError("东财 429"))},
+                    {"a_stock": _raising(VendorUnavailableError("东财 429"))},
                 ):
                     result = I.route_to_vendor(method, "600519", "2026-08-25")
                 self.assertIsInstance(result, str)
@@ -98,7 +98,7 @@ class SignalToolThrottleTests(unittest.TestCase):
         """The exact production regression, pinned by its message."""
         with patch.dict(
             I.VENDOR_METHODS["get_fund_flow"],
-            {"a_stock": _raising(VendorRateLimitError("东财 429"))},
+            {"a_stock": _raising(VendorUnavailableError("东财 429"))},
         ):
             result = I.route_to_vendor("get_fund_flow", "600519", "2026-08-25", False)
         self.assertNotIn("No available vendor", result)
@@ -114,19 +114,38 @@ class SignalToolThrottleTests(unittest.TestCase):
 
 
 class CoreCategoryThrottleTests(unittest.TestCase):
-    """Core data must stay loud: degrading prices would hide a broken primary."""
+    """Throttled prices are reported as the vendors' failure, by name, and never
+    as a verdict on the instrument.
+
+    This fork used to raise here instead, so a broken primary could not hide
+    behind a calm message. Since upstream v0.6.0 every category answers with the
+    vendor_unavailable sentinel: a tool's exception ends the whole run (LangGraph's
+    ToolNode re-raises it), and raising correctly would turn one transient Yahoo
+    throttle into a failed paid run.
+    """
 
     def setUp(self):
         set_config(copy.deepcopy(default_config.DEFAULT_CONFIG))
 
     def test_fully_throttled_core_category_names_the_throttle(self):
         throttled = {
-            vendor: _raising(VendorRateLimitError(f"{vendor} 429"))
+            vendor: _raising(VendorUnavailableError(f"{vendor} 429"))
             for vendor in I.VENDOR_METHODS["get_stock_data"]
         }
         with patch.dict(I.VENDOR_METHODS["get_stock_data"], throttled):
-            with self.assertRaises(VendorRateLimitError):
-                I.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-08-25")
+            result = I.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-08-25")
+        self.assertTrue(result.startswith("DATA_UNAVAILABLE"), result)
+        self.assertIn("429", result)
+        self.assertIn("says nothing about the instrument", result)
+
+    def test_a_throttled_yahoo_and_an_a_stock_refusal_do_not_blame_the_symbol(self):
+        # a_stock declines a US ticker by string inspection; Yahoo, which covers
+        # it, was never heard from. That is not "no data for AAPL".
+        throttled = {"yfinance": _raising(VendorUnavailableError("yfinance 429"))}
+        with patch.dict(I.VENDOR_METHODS["get_stock_data"], throttled):
+            result = I.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-08-25")
+        self.assertTrue(result.startswith("DATA_UNAVAILABLE"), result)
+        self.assertNotIn("A-share", result)
 
     def test_core_category_is_not_optional(self):
         self.assertNotIn("core_stock_apis", I.OPTIONAL_CATEGORIES)

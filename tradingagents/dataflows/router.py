@@ -30,7 +30,7 @@ from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
-    VendorRateLimitError,
+    VendorUnavailableError,
 )
 from tradingagents.dataflows.fundamentals_evidence import (
     get_quality_evidence as get_yfinance_quality_evidence,
@@ -161,19 +161,6 @@ TOOLS_CATEGORIES = {
     },
 }
 
-VENDOR_LIST = [
-    "yfinance",
-    "sec_edgar",
-    "fred",
-    "polymarket",
-    "alpha_vantage",
-    # A-share (沪深京) over 东财/新浪/同花顺. Listed last, and last in each method
-    # dict below, so it is only reached once the other vendors have declined —
-    # it refuses anything that is not a 6-digit A-share code, so a US ticker
-    # never touches it.
-    "a_stock",
-]
-
 # Optional enrichment categories. These add macro/event context to the news
 # analyst but are not core to a decision, so a vendor failure here degrades to a
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
@@ -203,17 +190,11 @@ OPTIONAL_CATEGORIES = {
     "macro_data", "prediction_markets", "signal_data", "earnings_commentary",
 }
 
-#: Categories where an all-vendors-unavailable chain must raise rather than
-#: degrade to a sentinel.
-#:
-#: Prices are quoted as fact by every downstream agent and the verification
-#: snapshot is built from them, so a calm "data unavailable" there hides a broken
-#: primary vendor behind a run that looks like it merely lacked one input. A
-#: fundamentals, news or sentiment gap is survivable and the run should continue
-#: without it, which is what upstream's degrade-don't-crash rule is for.
-LOUD_ON_UNAVAILABLE = {"core_stock_apis"}
 
 # Mapping of methods to their vendor-specific implementations
+# `a_stock` (沪深京 over 东财/新浪/同花顺) is last in each method's dict, so it is
+# only reached once the other vendors have declined: it refuses anything that
+# is not a 6-digit A-share code, so a US ticker never touches it.
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
@@ -342,6 +323,30 @@ def get_vendor(category: str, method: str = None) -> str:
     return config.get("data_vendors", {}).get(category, "default")
 
 
+def vendor_unavailable(method: str, error: Exception) -> str:
+    """What a call returns when every vendor was throttled or unreachable."""
+    return (
+        f"DATA_UNAVAILABLE: no configured vendor could serve {method} right now "
+        f"({error}). This says nothing about the instrument; report the "
+        f"data as unavailable and do not estimate or fabricate values."
+    )
+
+
+def no_data_available(error: NoMarketDataError) -> str:
+    """What a call returns when every vendor that answered had no usable data."""
+    resolved = "" if error.canonical == error.symbol else f" (resolved to '{error.canonical}')"
+    # Surface the typed error's detail (e.g. "latest row is 2025-06-11 ...
+    # stale") so the agent sees the specific reason — invalid symbol, no
+    # coverage, or stale data — not just a generic "unavailable".
+    reason = f" ({error.detail})" if error.detail else ""
+    return (
+        f"NO_DATA_AVAILABLE: No usable market data for '{error.symbol}'{resolved} from "
+        f"any configured vendor{reason}. The symbol may be invalid, delisted, "
+        f"not covered, or the vendor returned stale data. Do not estimate or "
+        f"fabricate values — report that data is unavailable for this symbol."
+    )
+
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
@@ -370,32 +375,23 @@ def route_to_vendor(method: str, *args, **kwargs):
         vendor_chain = all_available_vendors
 
     last_no_data: NoMarketDataError | None = None
+    last_unavailable: VendorUnavailableError | None = None
+    failed: Exception | None = None     # a vendor that raised something untyped
     first_error: Exception | None = None
-    last_rate_limit: VendorRateLimitError | None = None
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
             return impl_func(*args, **kwargs)
-        except VendorRateLimitError as e:
-            # Upstream's wording: naming the exception in the log is what tells a
-            # throttle apart from an outage.
-            logger.warning("Vendor %r unavailable for %s: %s; trying next vendor.",
-                           vendor, method, e)
-            # Recorded rather than dropped. A multi-vendor chain moves on and this
-            # never mattered, but a single-vendor category (signal_data) has
-            # nothing to move on to, so the tail below was left with no error at
-            # all and reported "No available vendor for 'get_fund_flow'" -- which
-            # names a registration bug that did not exist and hides the throttle
-            # that did.
-            #
-            # Folded into first_error rather than returned as a sentinel outright,
-            # which is what upstream does here: the optional/required split below
-            # has to keep applying, because degrading a throttled *core* category
-            # to a sentinel would hide a broken primary behind a calm message.
-            if last_rate_limit is None:
-                last_rate_limit = e
+        except VendorUnavailableError as e:
+            logger.warning("Vendor %r unavailable for %s: %s; trying next vendor.", vendor, method, e)
+            # Kept so an all-unavailable chain can say the vendor was the
+            # problem, rather than reporting nothing about the symbol. A
+            # single-vendor category (signal_data) has nothing to move on to, and
+            # without this it reported "No available vendor for 'get_fund_flow'",
+            # naming a registration bug that did not exist.
+            last_unavailable = e
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
@@ -412,35 +408,25 @@ def route_to_vendor(method: str, *args, **kwargs):
             logger.warning("Vendor %r failed for %s: %s", vendor, method, e)
             if first_error is None:
                 first_error = e
+            failed = e
             continue
 
-    # Every vendor was throttled or unreachable: that is a fact about the
-    # vendors, not about the instrument, and outside the categories above it must
-    # not end the run.
-    #
-    # Ahead of the no-data verdict below, which is the precedence upstream
-    # introduced and this fork needs more than upstream does. `a_stock` sits in
-    # every chain here and refuses a non-A-share code by string inspection, so a
-    # throttled Yahoo plus that refusal used to answer a US ticker with
-    # "NO_DATA_AVAILABLE ... the symbol may be invalid, delisted, or not covered
-    # (not an A-share code)" — a confident claim about the instrument assembled
-    # out of one vendor declining the venue and the vendor that covers it never
-    # being heard from. A vendor we could not reach may well have had the data,
-    # so "unavailable" is the weaker and therefore truer answer.
-    if last_rate_limit is not None:
-        if category not in LOUD_ON_UNAVAILABLE:
-            logger.warning("All vendors unavailable for %s: %s", method, last_rate_limit)
-            return (
-                f"DATA_UNAVAILABLE: no configured vendor could serve {method} right now "
-                f"({last_rate_limit}). This says nothing about the instrument; report the "
-                f"data as unavailable and do not estimate or fabricate values."
-            )
-        # A throttled vendor is a real failure with a nameable cause, so fold it
-        # into first_error and let the block below raise it.
-        if first_error is None:
-            first_error = last_rate_limit
+    # A vendor that throttled or failed the request never said whether it has
+    # the symbol, so no other vendor's "no data" can speak for the whole chain:
+    # report the vendors as the problem, not the instrument. It must not end the
+    # run either, core prices included: a tool's exception ends the whole graph
+    # (LangGraph's ToolNode re-raises it), and the sentinel names the throttle.
+    # This fork needs the rule more than upstream does: `a_stock` sits in every
+    # chain and refuses a non-A-share code by string inspection, so a throttled
+    # Yahoo plus that refusal used to answer a US ticker with "NO_DATA_AVAILABLE
+    # ... not an A-share code", a claim about the instrument made by the one
+    # vendor that does not cover it.
+    if last_unavailable is not None:
+        return vendor_unavailable(method, last_unavailable)
+    if failed is not None and last_no_data is not None:
+        return vendor_unavailable(method, failed)
 
-    # If any vendor reported "no data", the symbol is genuinely unavailable.
+    # Every vendor that answered reported "no data": the symbol is genuinely unavailable.
     # Return one explicit, instructive sentinel rather than a vendor-specific
     # empty string, so the agent reports "unavailable" instead of inventing a
     # value. This takes precedence over incidental fallback errors.
@@ -452,25 +438,7 @@ def route_to_vendor(method: str, *args, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        sym = last_no_data.symbol
-        canonical = last_no_data.canonical
-        resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
-        # Surface the typed error's detail (e.g. "latest row is 2025-06-11 ...
-        # stale") so the agent sees the specific reason — invalid symbol, no
-        # coverage, or stale data — not just a generic "unavailable".
-        reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
-        return (
-            f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
-            f"any configured vendor{reason}. The symbol may be invalid, delisted, "
-            f"not covered, or the vendor returned stale data. Do not estimate or "
-            f"fabricate values — report that data is unavailable for this symbol."
-        )
-
-    # A throttled vendor is a real failure with a nameable cause, so fold it into
-    # first_error here and let the block below apply the same optional-category
-    # degradation and reporting that every other failure gets.
-    if first_error is None and last_rate_limit is not None:
-        first_error = last_rate_limit
+        return no_data_available(last_no_data)
 
     # No vendor returned data and none reported clean "no data" — surface the
     # first real error (e.g. the primary vendor's network failure). Optional

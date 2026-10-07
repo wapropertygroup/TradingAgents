@@ -153,8 +153,22 @@ def test_a_chinese_label_or_word_is_read(text, expected):
 
 
 @pytest.mark.unit
-def test_the_last_chinese_label_wins():
-    assert extract_rating("**评级**：买入\n\n重新权衡之后：\n\n**评级**：减持") == "Underweight"
+def test_the_opening_chinese_label_is_the_call():
+    # As in English (upstream #1466): the decision opens with its rating.
+    assert extract_rating("**评级**：买入\n\n重新权衡之后：\n\n**评级**：减持") == "Buy"
+
+
+@pytest.mark.unit
+def test_chinese_labels_that_disagree_with_no_opening_one_are_no_call():
+    text = "讨论了多空双方。\n\n**评级**：买入\n\n重新权衡之后：\n\n**评级**：减持"
+    assert extract_rating(text) is None
+
+
+@pytest.mark.unit
+def test_a_chinese_label_is_read_and_a_negated_rating_word_is_not():
+    # Upstream reads no Chinese label and so calls this no rating; this fork
+    # reads the label, and the negated Sell in the prose is ignored either way.
+    assert extract_rating("**评级**：买入\n\n不建议卖出 (Sell)。") == "Buy"
 
 
 @pytest.mark.unit
@@ -635,10 +649,12 @@ def test_large_figures_count_in_yi_and_wanyi():
 def test_the_report_title_follows_the_language_but_the_headings_do_not(tmp_path):
     from tradingagents.reporting import write_report_tree
 
-    state = {"market_report": "市场", "risk_debate_state": {"judge_decision": "**评级**：持有"}}
+    state = {"market_report": "市场", "final_trade_decision": "**评级**：持有"}
     with run_config({"output_language": ZH}):
         complete = write_report_tree(state, "INTC", tmp_path).read_text(encoding="utf-8")
-    assert complete.startswith("# 交易分析报告：INTC\n\n生成时间：")
+    assert complete.startswith("# 交易分析报告：INTC\n\n")
+    assert "\n- 评级：持有\n" in complete
+    assert "\n- 生成时间：" in complete
     # Consumers split the report on these, so they stay as they are.
     assert "### Market Analyst" in complete
     assert "## V. Portfolio Manager Decision\n\n### Portfolio Manager" in complete

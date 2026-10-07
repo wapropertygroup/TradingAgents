@@ -16,6 +16,8 @@ import pandas as pd
 from stockstats import wrap
 
 from tradingagents.dataflows import a_stock
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.symbols import normalize_symbol
 from tradingagents.dataflows.vendors.yahoo.ohlcv import load_ohlcv
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
@@ -26,7 +28,7 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
 )
 
 
-def _load_ohlcv_for(symbol: str, curr_date: str) -> pd.DataFrame:
+def _load_ohlcv_for(symbol: str, as_of_date: str) -> pd.DataFrame:
     """OHLCV from whichever vendor can actually serve ``symbol``.
 
     ``load_ohlcv`` is the *yfinance* loader, and Yahoo does not list 沪深京 codes
@@ -49,29 +51,29 @@ def _load_ohlcv_for(symbol: str, curr_date: str) -> pd.DataFrame:
         # No ``fill_gaps`` knob on this one, and none needed: it returns the
         # vendor's own kline rows, so a non-trading day is simply absent rather
         # than carried forward.
-        return a_stock.load_ohlcv(symbol, curr_date)
+        return a_stock.load_ohlcv(symbol, as_of_date)
     # As reported: this snapshot is quoted by the agents as exact prices, so a
     # gap-filled cell would put the previous session's number under this date.
-    return load_ohlcv(symbol, curr_date, fill_gaps=False)
+    return load_ohlcv(symbol, as_of_date, fill_gaps=False)
 
 
-def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
-    """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
+def _verified_rows(symbol: str, as_of_date: str) -> pd.DataFrame:
+    """OHLCV on or before as_of_date, date-sorted. Raises NoMarketDataError if nothing usable.
 
     The loaders already normalize the Date column and filter out look-ahead
     rows, but we re-apply the cutoff defensively — this is a verification path,
     so it must not trust its input to be pre-filtered.
     """
-    data = _load_ohlcv_for(symbol, curr_date)
+    data = _load_ohlcv_for(symbol, as_of_date)
     if data is None or data.empty:
-        raise ValueError(f"No OHLCV data available for {symbol}.")
+        raise NoMarketDataError(symbol, normalize_symbol(symbol), "no price rows")
 
     df = data.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df = df.dropna(subset=["Date"])
-    df = df[df["Date"] <= pd.to_datetime(curr_date)].sort_values("Date")
+    df = df[df["Date"] <= pd.to_datetime(as_of_date)].sort_values("Date")
     if df.empty:
-        raise ValueError(f"No OHLCV rows on or before {curr_date} for {symbol}.")
+        raise NoMarketDataError(symbol, normalize_symbol(symbol), f"no price rows on or before {as_of_date}")
     # Re-stamp last: copy(), dropna() and the slice above each return a new frame,
     # and .attrs does not survive that on every pandas version. The A-share loader
     # records its vendor and adjustment basis there, which the header renders.
@@ -95,7 +97,7 @@ def _fmt(value) -> str:
 
 def build_verified_market_snapshot(
     symbol: str,
-    curr_date: str,
+    as_of_date: str,
     look_back_days: int = 30,
     indicators: Iterable[str] | None = None,
 ) -> str:
@@ -103,7 +105,7 @@ def build_verified_market_snapshot(
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
     # Volume); stockstats `wrap()` lowercases columns and adds indicator
     # columns, so read raw prices from `df` and indicators from `stock_df`.
-    df = _verified_rows(symbol, curr_date)
+    df = _verified_rows(symbol, as_of_date)
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
@@ -123,7 +125,7 @@ def build_verified_market_snapshot(
     lines = [
         f"## Verified market data snapshot for {symbol.upper()}",
         "",
-        f"- Requested analysis date: {curr_date}",
+        f"- Requested analysis date: {as_of_date}",
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",
     ]

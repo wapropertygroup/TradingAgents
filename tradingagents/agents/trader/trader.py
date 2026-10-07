@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import functools
-
 from langchain_core.messages import AIMessage
 
 from tradingagents.agents.context import (
@@ -21,7 +19,6 @@ from tradingagents.agents.structured import (
 )
 from tradingagents.dataflows.a_stock import is_a_share
 
-
 _A_SHARE_CONSTRAINTS = """
 For this mainland China A-share, obey market mechanics: T+1 settlement for
 shares bought today; board-specific daily price limits (normally 10%, 20% for
@@ -35,7 +32,7 @@ Do not invent an executable price or imply same-day round trips are available.
 def create_trader(llm):
     structured_llm = bind_structured(llm, TraderProposal, "Trader")
 
-    def trader_node(state, name):
+    def trader_node(state):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
@@ -153,13 +150,9 @@ def create_trader(llm):
             },
         ]
 
-        trader_plan, proposal = invoke_structured(
-            structured_llm,
-            llm,
-            messages,
-            render_trader_proposal,
-            "Trader",
-        )
+        proposal = invoke_structured(structured_llm, messages, "Trader")
+        trader_plan = (render_trader_proposal(proposal) if proposal is not None
+                       else llm.invoke(messages).content)
 
         # The typed levels travel on the state as well as inside the rendered
         # markdown, so a deterministic risk engine downstream reads numbers rather
@@ -172,7 +165,6 @@ def create_trader(llm):
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
             "trader_levels": levels,
-            "sender": name,
         }
 
-    return functools.partial(trader_node, name="Trader")
+    return trader_node

@@ -1,32 +1,28 @@
 """Portfolio Manager: synthesises the risk-analyst debate into the final decision.
 
 Uses LangChain's ``with_structured_output`` so the LLM produces a typed
-``PortfolioDecision`` directly, in a single call.  The result is rendered
-back to markdown for storage in ``final_trade_decision`` so memory log,
-CLI display, and saved reports continue to consume the same shape they do
-today.  When a provider does not expose structured output, the agent falls
-back gracefully to free-text generation.
+``PortfolioDecision`` directly, in a single call. Its rating is the run's
+``final_rating``, and the decision is rendered to markdown as
+``final_trade_decision`` for the memory log, CLI display and saved reports.
+When a provider does not expose structured output, the agent falls back to
+free-text generation and the rating is read from that text.
 """
 
 from __future__ import annotations
 
+from tradingagents import risk_engine
 from tradingagents.agents.context import (
     get_instrument_context_from_state,
+    get_language_instruction,
     get_market_context_block,
     get_portfolio_block,
     get_relative_strength_block,
     get_risk_gate_block,
-    get_language_instruction,
 )
+from tradingagents.agents.rating import parse_rating
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
-from tradingagents.agents.structured import (
-    NO_EXTERNAL_TOOLS,
-    bind_structured,
-    invoke_structured,
-)
+from tradingagents.agents.structured import NO_EXTERNAL_TOOLS, bind_structured, invoke_structured
 from tradingagents.dataflows.a_stock import is_a_share
-from tradingagents import risk_engine
-
 
 _A_SHARE_FINAL_CONSTRAINTS = """
 This is a mainland China A-share. The final action must respect T+1, the
@@ -160,13 +156,15 @@ Write these sections, in this order, starting with the rating on its own line:
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 
-        final_trade_decision, decision = invoke_structured(
-            structured_llm,
-            llm,
-            prompt,
-            render_pm_decision,
-            "Portfolio Manager",
-        )
+        # The typed rating is the decision; the rendered text only carries it.
+        # Read back from text, a rating the thesis quotes could replace it.
+        decision = invoke_structured(structured_llm, prompt, "Portfolio Manager")
+        if decision is not None:
+            final_trade_decision = render_pm_decision(decision)
+            final_rating = decision.rating.value
+        else:
+            final_trade_decision = llm.invoke(prompt).content
+            final_rating = parse_rating(final_trade_decision)
 
         # Compliance as a computed fact rather than something a reader infers from
         # the paragraph above. An A/B on this pipeline found the model does honour a
@@ -184,7 +182,6 @@ Write these sections, in this order, starting with the rating on its own line:
             final_trade_decision = final_trade_decision + "\n" + notice
 
         new_risk_debate_state = {
-            "judge_decision": final_trade_decision,
             "history": risk_debate_state["history"],
             "aggressive_history": risk_debate_state["aggressive_history"],
             "conservative_history": risk_debate_state["conservative_history"],
@@ -199,6 +196,7 @@ Write these sections, in this order, starting with the rating on its own line:
         return {
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
+            "final_rating": final_rating,
             # The two fields a decision ledger needs. Both are {} on the free-text
             # path, where the numbers genuinely do not exist -- unstated, not zero.
             "pm_levels": pm_levels,

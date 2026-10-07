@@ -157,9 +157,9 @@ def _tool_results(messages) -> dict[str, str]:
 
     Keyed by tool name and last-wins, so a re-entered node reads the most recent
     result rather than a stale one. Only this analyst's two tools are collected —
-    a preceding analyst's messages are cleared by ``Msg Clear`` before this node
-    runs, but reading by name means an unexpected leftover cannot be mistaken for
-    earnings evidence.
+    each analyst runs on a message history of its own (``graph.setup``'s
+    ``_analyst_graph``), but reading by name means an unexpected leftover cannot
+    be mistaken for earnings evidence.
     """
     found: dict[str, str] = {}
     for message in messages:

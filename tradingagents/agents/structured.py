@@ -56,42 +56,36 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
-def invoke_structured(
-    structured_llm: Any | None,
-    plain_llm: Any,
-    prompt: Any,
-    render: Callable[[T], str],
-    agent_name: str,
-) -> tuple[str, T | None]:
-    """Like :func:`invoke_structured_or_freetext`, but also returns the parsed object.
+def invoke_structured(structured_llm: Any | None, prompt: Any, agent_name: str) -> T | None:
+    """Run the structured call; ``None`` when there is none or it fails.
 
-    ``(markdown, parsed)``. ``parsed`` is ``None`` whenever the free-text path was
+    ``prompt`` is whatever the underlying LLM accepts (a string for chat
+    invocations, a list of message dicts for chat models that take that
+    shape), so a caller can forward the same value to its free-text fallback.
+
+    Returns the parsed object, not its markdown, so a caller that needs typed
+    fields (the Trader's and the Portfolio Manager's levels) keeps them rather
+    than re-parsing them out of prose. ``None`` means the free-text path must be
     taken — an unsupported provider, a malformed response, a thinking model that
-    answered in prose. A caller that needs the typed fields must treat ``None`` as
-    *unstated* and not substitute defaults: the numbers genuinely do not exist on
-    that path, and inventing them is worse than reporting a proposal as unchecked.
-
-    Exists because the render-and-discard shape of the original loses every typed
-    field the moment it becomes markdown, and re-parsing markdown to recover them
-    is how a number that was structured becomes a number scraped by regex.
+    answered in prose — and a caller must treat its typed fields as *unstated*,
+    never substitute defaults.
     """
-    if structured_llm is not None:
-        try:
-            result = structured_llm.invoke(prompt)
-            if result is None:
-                # A thinking model can answer in plain text instead of calling
-                # the tool, leaving the parser with nothing to return. Treat it
-                # as a structured miss and fall back, with a clear reason.
-                raise ValueError("structured output returned no parsed result")
-            return render(result), result
-        except Exception as exc:
-            logger.warning(
-                "%s: structured-output invocation failed (%s); retrying once as free text",
-                agent_name, exc,
-            )
-
-    response = plain_llm.invoke(prompt)
-    return response.content, None
+    if structured_llm is None:
+        return None
+    try:
+        result = structured_llm.invoke(prompt)
+        if result is None:
+            # A thinking model can answer in plain text instead of calling
+            # the tool, leaving the parser with nothing to return. Treat it
+            # as a structured miss and fall back, with a clear reason.
+            raise ValueError("structured output returned no parsed result")
+        return result
+    except Exception as exc:
+        logger.warning(
+            "%s: structured-output invocation failed (%s); retrying once as free text",
+            agent_name, exc,
+        )
+        return None
 
 
 def invoke_structured_or_freetext(
@@ -103,14 +97,10 @@ def invoke_structured_or_freetext(
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
-    ``prompt`` is whatever the underlying LLM accepts (a string for chat
-    invocations, a list of message dicts for chat models that take that
-    shape). The same value is forwarded to the free-text path so the
-    fallback sees the same input the structured call did.
-
-    Thin wrapper over :func:`invoke_structured` for the agents that need only the
-    markdown, so there is one implementation of the fallback rather than two that
-    can drift apart in their error handling.
+    The same ``prompt`` is forwarded to the free-text path, so the fallback sees
+    the input the structured call did.
     """
-    return invoke_structured(structured_llm, plain_llm, prompt, render,
-                             agent_name)[0]
+    result = invoke_structured(structured_llm, prompt, agent_name)
+    if result is not None:
+        return render(result)
+    return plain_llm.invoke(prompt).content
